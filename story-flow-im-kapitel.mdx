@@ -1,2 +1,180 @@
-<Image src="https://blob-cdn.documentation.ai/org-a6cc8753-0b43-40ce-a703-63395282d5e9/doc-c0f47072-8de7-4ddd-b984-93be075ee31b/1775663922741-gex39bqj5v-pasted-image-1775663918927.png?fm=auto&auto=compress%2Cformat" width="433" height="502" alt="" />
+---
+title: Story Flow im Kapitel
+description: Konfiguriere im Manuskript-Editor, wie ein Kapitel in den Story Flow eingebunden wird – über Vorgänger, eigenständige Stränge und Nexus-Zuflüsse.
+---
 
+<Image src="https://blob-cdn.documentation.ai/org-a6cc8753-0b43-40ce-a703-63395282d5e9/doc-c0f47072-8de7-4ddd-b984-93be075ee31b/1775663922741-gex39bqj5v-pasted-image-1775663918927.png?fm=auto&auto=compress%2Cformat" width="433" height="502" alt="Story Flow-Einstellungen für ein Kapitel im Manuskript-Editor mit Story Flow Connector und Nexus-Bereich in der rechten Seitenleiste" />
+
+## Was der Story Flow im Kapitel steuert
+
+Der Story Flow im Kapitel-Panel legt fest, wie dieses Kapitel erzählerisch eingebunden ist: ob es an ein vorheriges Kapitel anschließt, einen neuen Strang eröffnet oder mehrere Zuflüsse aus früheren Kapiteln bündelt.
+
+Über zwei UI-Bereiche steuerst du diese Einbindung:
+
+- **Story Flow Connector**: genau ein Haupt-Vorgänger-Kapitel.
+- **Nexus**: optionale zusätzliche Zufluss-Kapitel und die Auflösungslogik.
+
+---
+
+## So konfigurierst du ein Kapitel
+
+<Steps>
+
+<Step title="Kapitel im Manuskript-Editor öffnen" icon="play-circle">
+
+- Öffne den Manuskript-Editor deines Romans.
+- Wähle im Kapitelbaum das Kapitel, dessen Story Flow du bearbeiten möchtest.
+- Öffne in der rechten Sidebar das `ChapterPanel` und dort den Bereich `Story Flow Connector` bzw. `Nexus`.
+
+</Step>
+
+<Step title="Story Flow Connector einstellen" icon="settings">
+
+- Wähle, ob das Kapitel automatisch an das vorherige Kapitel anschließt, einen neuen Strang beginnt oder explizit an ein bestimmtes Kapitel andockt.
+- Achte auf Warnungen im Dropdown: Zirkelschlüsse werden blockiert, ungünstige Reihenfolgen markiert.
+
+</Step>
+
+<Step title="Nexus-Zuflüsse konfigurieren" icon="code">
+
+- Füge bei Bedarf frühere Kapitel als Zuflüsse hinzu, lege deren Reihenfolge und Pflichtstatus fest.
+- Stelle die Nexus-Logik ein: chronologisch letzter Wert oder Hauptstrang gewinnt.
+
+</Step>
+
+</Steps>
+
+<Callout kind="info">
+
+Der Story Flow wirkt kapitelbezogen: Einstellungen gelten immer nur für das aktuell ausgewählte Kapitel und verändern nicht rückwirkend die Konfiguration anderer Kapitel.
+
+</Callout>
+
+---
+
+## Story Flow Connector: Vorgänger des Kapitels
+
+Der Bereich **Story Flow Connector** definiert den einen Haupt-Vorgänger im Story Flow. Intern werden dafür zwei Felder auf dem Kapitel gesetzt:
+
+- `chapters.predecessor_chapter_id`
+- `chapters.is_standalone`
+
+### Drei Auswahlmodi im Dropdown
+
+Der Select im `ChapterPanel` bietet drei logische Modi:
+
+1. **Automatisch (vorheriges Kapitel)**  
+   UI-Wert: leer (`""`)
+
+   - `is_standalone = false`
+   - `predecessor_chapter_id = null`
+   - Semantik: Vorgänger ist automatisch das Kapitel mit der nächst-niedrigeren `sort_order`.
+
+2. **⊘ Kein Bezug (neuer Story-Strang)**  
+   UI-Wert: `"standalone"`
+
+   - `is_standalone = true`
+   - `predecessor_chapter_id = null`
+   - Semantik: Das Kapitel startet einen neuen Story-Strang ohne Vorgänger-State.
+
+3. **Expliziter Vorgänger (konkretes Kapitel wählen)**  
+   UI-Wert: UUID eines Kapitels
+
+   - `is_standalone = false`
+   - `predecessor_chapter_id = ausgewählte UUID`
+   - Semantik: Das Kapitel dockt erzählerisch an dieses konkrete Vorgänger-Kapitel an, unabhängig von der automatischen Reihenfolge.
+
+<Callout kind="info">
+
+Nutze den automatischen Modus, solange deine Kapitelreihenfolge dem Hauptstrang entspricht. Wechsle auf einen expliziten Vorgänger oder `⊘ Kein Bezug`, sobald du alternative Stränge oder Sprünge im Zeitverlauf modellierst.
+
+</Callout>
+
+### Validierungen und Warnungen im Connector
+
+Beim Auswählen eines Vorgängers prüft der Editor zwei typische Fehlerfälle.
+
+<Callout kind="alert">
+
+**Zirkelschluss-Erkennung**  
+Wenn ein Vorgänger dazu führen würde, dass Kapitel in einer Schleife aufeinander verweisen (`A → B → C → A`), blockiert der Editor die Auswahl. Du siehst eine Warnung `Zirkelschluss erkannt …`, und der entsprechende Eintrag bleibt nicht wählbar.
+
+</Callout>
+
+<Callout kind="alert">
+
+**Vorgänger liegt hinter dem aktuellen Kapitel**  
+Wenn du ein Kapitel als Vorgänger wählst, dessen `sort_order` **größer oder gleich** der `sort_order` des aktuellen Kapitels ist, markiert der Editor die Auswahl als problematisch und zeigt eine Warnung.  
+So erkennst du auf einen Blick, wenn der Story Flow nicht zur linearen Kapitelreihenfolge passt.
+
+</Callout>
+
+---
+
+## Nexus: Zuflüsse aus mehreren Kapiteln
+
+Der Bereich **Nexus** ergänzt den einen Haupt-Vorgänger um weitere Zuflüsse. Technisch arbeitet der Editor hier mit der Tabelle `chapter_inflows` und dem Feld `chapters.nexus_mode`.
+
+### Zufluss-Kapitel (`chapter_inflows`)
+
+Für jedes Zufluss-Kapitel legt der Editor einen Eintrag in `public.chapter_inflows` an:
+
+- `chapter_id`: das aktuelle Kapitel.
+- `inflow_chapter_id`: das Kapitel, dessen Story-State zufließt.
+- `sort_order`: Reihenfolge der Zuflüsse im Nexus.
+- `is_required`: ob der Zufluss zwingend vorhanden sein muss.
+
+Die UI erzwingt dabei folgende Regeln:
+
+- **Nur frühere Kapitel**: Du kannst nur Kapitel mit `sort_order` kleiner als die `sort_order` des aktuellen Kapitels als Zufluss auswählen.
+- **Kein Selbst-Zufluss**: `chapter_id` und `inflow_chapter_id` dürfen nicht identisch sein.
+- **Keine Duplikate**: Kombinationen aus Kapitel und Zufluss sind eindeutig; jedes Zufluss-Kapitel erscheint höchstens einmal.
+
+### Reihenfolge und Pflichtstatus
+
+Die Liste der Zuflüsse im Nexus verhält sich wie eine sortierbare Queue:
+
+- **Reihenfolge per Drag & Drop**  
+  Wenn du die Zuflüsse im UI verschiebst, aktualisiert der Editor `sort_order`. Die sichtbare Reihenfolge entspricht immer der gespeicherten Reihenfolge.
+
+- **Erforderlich vs. optional (`is_required`)**  
+  Jedes Zufluss-Kapitel kannst du als:
+
+  - **erforderlich** markieren (`is_required = true`), wenn das Kapitel nur dann sinnvoll ist, wenn dieser Zufluss-State vorliegt.
+  - **optional** markieren (`is_required = false`), wenn der Zufluss ergänzend wirkt, das Kapitel aber auch ohne ihn konsistent bleiben soll.
+
+<Callout kind="info">
+
+Nutze `is_required = true` für zentrale Wendepunkte und `is_required = false` für optionale Pfade oder Nebenstränge, die das Kapitel nur anreichern.
+
+</Callout>
+
+### Nexus-Modus (`chapters.nexus_mode`)
+
+Der Nexus-Modus legt fest, wie der Editor konkurrierende Story-States aus mehreren Zuflüssen auflöst. Im `NexusPanel` wählst du zwischen zwei Modi:
+
+1. **Modus A – Chronologisch, letzter Wert gewinnt**  
+   Intern: `nexus_mode = 'chronological_last_wins'`
+
+   - Der Editor betrachtet die zeitliche Reihenfolge der Zuflüsse.
+   - Der **zuletzt** eintreffende, gültige Zufluss-State überschreibt frühere Werte.
+
+2. **Modus B – Hauptstrang gewinnt**  
+   Intern: `nexus_mode = 'mainline_wins'`
+
+   - Der Editor bevorzugt den definierten Hauptstrang.
+   - States aus diesem Strang setzen sich gegen konkurrierende Zuflüsse durch.
+
+<Callout kind="alert">
+
+Wenn du den Nexus-Modus änderst, kann sich das erzählerische Ergebnis des Kapitels deutlich verändern – insbesondere bei widersprüchlichen Decisions aus parallelen Strängen. Prüfe nach der Umstellung kritische Kapitelverläufe im Editor.
+
+</Callout>
+
+---
+
+## Weiterführend
+
+Mehr zu den technischen Details des Story Flow, den beteiligten Tabellen und der Story-State-Verrechnung findest du unter:
+
+- [Story Flow (technische Perspektive)](/story-flow-technisch)

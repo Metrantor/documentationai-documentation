@@ -9,7 +9,7 @@ Story Flow bezeichnet in diesem Projekt den technischen Verlauf einer Geschichte
 
 <Callout kind="info">
 
-Es gibt kein Modul oder keinen Code-Namespace mit dem Namen Story Flow. Der Flow entsteht aus den Datenbank-Relationen (vor allem predecessor-Felder und Inflow-Tabellen) und wird zur Laufzeit durch die Supabase-Funktionsfamilie rund um `get_story_state_at_beat` ausgewertet.
+Es gibt kein Modul oder keinen Code-Namespace mit dem Namen Story Flow. Der Flow entsteht aus den Datenbank-Relationen (vor allem predecessor-Felder und Inflow-Tabellen) und wird zur Laufzeit durch SQL-Funktionen wie `public.get_story_state_at_beat` auf der Supabase-Datenbank ausgewertet.
 
 </Callout>
 
@@ -47,12 +47,12 @@ Die Story-State-Funktionsfamilie interpretiert diese Hierarchie als gerichteten 
 
 ```text
 Series
-  └─ Novel A (predecessor_novel_id = null)
+  └─ Novel A (predecessor_novel_id = null, is_standalone = false)
       ├─ Chapter 1 (predecessor_chapter_id = null)
       │   └─ Scenes / Beats
       └─ Chapter 2 (predecessor_chapter_id = Chapter 1)
           └─ Scenes / Beats
-  └─ Novel B (predecessor_novel_id = Novel A)
+  └─ Novel B (predecessor_novel_id = Novel A, is_standalone = false)
       └─ Chapter 3
           ↑
           └─ chapter_inflows: from Chapter 2 (zusätzlicher Strang)
@@ -76,18 +76,31 @@ Dieses Kapitel fasst die relevanten Entitäten und Felder zusammen, die den Flow
   - `predecessor_novel_id`
   - `sort_order`
   - `is_standalone`
+  - Semantik von `predecessor_novel_id` + `is_standalone`:
+    - `predecessor_novel_id = null` und `is_standalone = false` ⇒ automatischer Vorgänger (vorheriger Roman über `sort_order`)
+    - `predecessor_novel_id = null` und `is_standalone = true` ⇒ eigenständiger Roman ohne Vorgänger
+    - `predecessor_novel_id = <uuid>` und `is_standalone = false` ⇒ expliziter Vorgänger-Roman
 - **chapters**
   - `id`
   - `novel_id`
   - `predecessor_chapter_id`
   - `sort_order`
   - `is_standalone`
-  - `nexus_mode` (siehe Kapitel 4)
+  - `nexus_mode`
+    - Default: `chronological_last_wins`
+    - Zulässige Werte durch CHECK-Constraint:
+      - `chronological_last_wins`
+      - `mainline_wins`
 - **chapter_inflows**
+  - `id`
   - `chapter_id`
   - `inflow_chapter_id`
   - `sort_order`
   - `is_required`
+  - `created_at`
+  - Constraints:
+    - `UNIQUE (chapter_id, inflow_chapter_id)` (jeder Inflow nur einmal pro Zielkapitel)
+    - `CHECK (chapter_id <> inflow_chapter_id)` (kein Self-Inflow)
 - **scenes**
   - `id`
   - `chapter_id`
@@ -110,7 +123,7 @@ Dieses Kapitel fasst die relevanten Entitäten und Felder zusammen, die den Flow
   - `variable_id`
   - `value_json` (serialisierter Zielwert oder strukturierter Änderungswert)
 
-Diese Tabellen liefern die Rohdaten, die Funktionen wie `apply_chapter_changes_to_state` benötigen, um Story-States entlang des Flows zu verändern.
+Diese Tabellen liefern die Rohdaten, die SQL-Funktionen wie `public.get_story_state_at_beat` benötigen, um Story-States entlang des Flows zu verändern.
 
 ---
 
@@ -120,21 +133,25 @@ Mainline meint die lineare Kette eines primären Erzählstrangs. Sie wird unabh�
 
 ### Roman-Flow (Novels)
 
-- `novels.predecessor_novel_id` definiert eine Kette von Vorgänger-Romanen.
-- Alternativ kann `sort_order` für die Reihenfolge genutzt werden, falls kein Vorgänger gesetzt ist.
-- `novels.is_standalone` kann die Kette unterbrechen, sodass ein Roman ohne Vorgänger-State startet.
+Die effektive Vorgängerbestimmung eines Romans folgt immer dem gleichen Muster:
 
-Die Funktion `public.debug_state_after_novel(p_novel_id)` liefert den berechneten End-Story-State eines Romans und ist damit ein direkter Einstiegspunkt in den Roman-Flow.
+1. Wenn `novels.is_standalone = true`, hat der Roman **keinen Vorgänger** und startet mit einem eigenen Initial-State.
+2. Andernfalls, wenn `novels.predecessor_novel_id` gesetzt ist, verwendet der Flow **diesen expliziten Vorgänger-Roman**.
+3. Wenn weder Standalone noch expliziter Vorgänger greifen, nutzt der Flow **den vorherigen Roman nach `sort_order`** innerhalb der Series als automatischen Vorgänger.
+
+`novels.is_standalone` kann die Kette also explizit unterbrechen, sodass ein Roman ohne Vorgänger-State startet, selbst wenn ein vorheriger Roman in der Series existiert.
 
 ### Kapitel-Flow (Chapters)
 
-- `chapters.predecessor_chapter_id` definiert die direkte Vorgängerbeziehung innerhalb einer Novel.
-- Als Fallback kann `chapters.sort_order` genutzt werden, um eine implizite Reihenfolge zu rekonstruieren.
-- `chapters.is_standalone` verhindert, dass States aus Vorgänger-Chapters automatisch übernommen werden.
+Für Chapters innerhalb einer Novel gilt das gleiche dreistufige Muster:
+
+1. Wenn `chapters.is_standalone = true`, hat das Kapitel **kein Vorgänger-Kapitel** und beginnt mit dem State, der aus dem Roman-Kontext resultiert (oder komplett frisch, wenn der Roman selbst Standalone ist).
+2. Andernfalls, wenn `chapters.predecessor_chapter_id` gesetzt ist, fungiert **dieses Kapitel als expliziter Vorgänger**.
+3. Wenn weder Standalone noch expliziter Vorgänger gesetzt sind, nutzt der Flow **das Kapitel mit dem nächstkleineren `sort_order`** in derselben Novel als automatischen Vorgänger.
 
 <Callout kind="info">
 
-Die eigentliche Rekursion über den Kapitel-Flow läuft in der Funktion `get_state_before_chapter_json`. Diese Funktion klettert über Vorgänger-Chapters und Vorgänger-Novels zurück, bis ein konsistenter Startzustand gefunden ist. Zyklenschutz erfolgt über Pfadparameter wie `p_path_chapters` und `p_path_novels`.
+Die tatsächliche Implementierung der Vorgängerauflösung findet in den SQL-Funktionen auf Supabase statt und kombiniert die oben beschriebenen Regeln mit Zyklenschutz. Wichtig ist, dass `is_standalone` immer zuerst geprüft wird und damit sowohl explizite als auch automatische Vorgängerbeziehungen aushebeln kann.
 
 </Callout>
 
@@ -150,26 +167,23 @@ Ein Eintrag in `chapter_inflows` bedeutet:
 
 - `chapter_id` ist das Chapter, dessen Start-Story-State aus Mainline und Inflows gemergt wird.
 - `inflow_chapter_id` liefert einen zusätzlichen eingehenden Story-State.
+- `sort_order` steuert die Reihenfolge der Inflows im UI (z. B. für Drag-and-drop).
+- `is_required` beschreibt, ob der Inflow-Branch inhaltlich zwingend vorgesehen ist oder optional gelesen werden kann.
 
-Die zentrale Merge-Funktion ist:
-
-- `merge_story_states_for_chapter(mainline_state, inflow_states[], nexus_mode)`
+Das Datenmodell erlaubt pro Paar aus `chapter_id` und `inflow_chapter_id` nur einen Eintrag und verbietet Self-Inflows durch die `CHECK (chapter_id <> inflow_chapter_id)`-Constraint. Die tatsächliche Merge-Logik (wie genau Mainline- und Inflow-States zu einem konsistenten Kapitel-Startstate verschmolzen werden) orientiert sich am `nexus_mode` des Zielkapitels.
 
 ### Nexus-Modi des Chapters
 
-Das Feld `chapters.nexus_mode` steuert, wie konkurrierende Story-States vereinheitlicht werden:
+Das Feld `chapters.nexus_mode` steuert die Semantik, wie konkurrierende Story-States vereinheitlicht werden, wenn Mainline und Inflows unterschiedliche Werte für dieselben Variablen liefern. Das Datenmodell kennt aktuell zwei Modi:
 
 - **`mainline_wins`**
   - Der Story-State der Mainline hat Vorrang.
   - Bei Konflikten zwischen Mainline und Inflows gewinnt der Eintrag aus der Mainline.
+  - Inflows ergänzen nur Variablen, die in der Mainline noch nicht gesetzt sind.
 - **`chronological_last_wins`**
-  - Die Funktion nutzt `scenes.starts_at`, um die zeitliche Reihenfolge zu bestimmen.
-  - Bei Konflikten gewinnt der Eintrag mit der spätesten `starts_at` über alle beteiligten Stränge.
-
-Die Vergleichslogik wird über Hilfsfunktionen abgebildet:
-
-- `compare_story_state_entries`
-- `compare_story_state_entries_by_scene_time` (für `chronological_last_wins`)
+  - Die zeitliche Reihenfolge der zugrunde liegenden Szenen entscheidet über Konflikte.
+  - Die Implementierung orientiert sich an `scenes.starts_at` (bzw. `sort_order` als Fallback).
+  - Bei Konflikten gewinnt der Eintrag mit der **spätesten** Szene-Zeit über alle beteiligten Stränge hinweg, unabhängig davon, ob er aus der Mainline oder einem Inflow stammt.
 
 <CodeGroup tabs="Flow-Merge als Textdiagramm">
 
@@ -178,72 +192,43 @@ Mainline:  Chapter 10  ──► Chapter 11 (target)
 Inflows:   Chapter 7   ──┘
 
 nexus_mode = mainline_wins
-  → Konflikte: Eintrag aus Chapter 11 gewinnt
+  → Konflikte: Eintrag aus Chapter 11 (Mainline) gewinnt
 
 nexus_mode = chronological_last_wins
   → Konflikte: Eintrag aus der Szene mit größtem scenes.starts_at gewinnt,
-    unabhängig davon, ob er aus Mainline oder Inflow stammt
+    egal ob Mainline oder Inflow
 ```
 
 </CodeGroup>
 
+<Callout kind="info">
+
+Die oben beschriebenen Nexus-Modi bilden die **intended semantics** im Datenmodell und UI ab. Wie genau die SQL-Implementierung diese Konfliktregeln technisch umsetzt, kann sich weiterentwickeln und ist in den jeweiligen Funktionen in `story-state-funktionen-supabase.mdx` detailliert dokumentiert.
+
+</Callout>
+
 ---
 
-## Kapitel 5 — Evaluationsalgorithmus des Story-States entlang des Flows
+## Kapitel 5 — Evaluationsalgorithmus des Story-States an einem Beat
 
-Die Story-State-Funktionsfamilie berechnet den gültigen Zustand aller Story-Variablen an einem konkreten Beat. Operativ startest du in der Regel mit:
+Die zentrale, migrations-definierte SQL-Funktion zur State-Berechnung ist:
 
-- `public.get_story_state_at_beat(p_beat_id, p_mode)`
+- `public.get_story_state_at_beat(p_beat_id uuid, p_mode text default 'net')`
 
-Diese Funktion ruft intern:
+Diese Funktion berechnet den konsolidierten Zustand aller Story-Variablen zu einem bestimmten Beat und unterscheidet zwei Modi:
 
-1. `get_story_target_at_beat` (ermittelt das Zielkapitel und Zusatzinfos)
-2. `get_state_before_chapter_json` (rekursive Flow-Auswertung bis Kapitel-Beginn)
-3. `apply_chapter_changes_to_state` (Forward-Run durch das Kapitel bis zum Ziel-Beat)
+- `p_mode = 'net'`
+  - Evaluiert alle relevanten `story_variable_changes` **vor** dem Ziel-Beat.
+  - Ergebnis ist der State **direkt vor** dem Beat.
+- `p_mode = 'gross'`
+  - Evaluiert alle relevanten `story_variable_changes` **inklusive** des Ziel-Beats.
+  - Ergebnis ist der State **nach Anwendung** der Änderungen am Beat.
 
-### End-to-End-Evaluation in Einzelschritten
-
-<Steps>
-
-<Step title="Beat und Zielkapitel bestimmen" icon="arrow-right">
-
-- Starte mit dem Ziel-Beat (`p_beat_id`).
-- `get_story_target_at_beat` löst die Zuordnung `beat → scene → chapter`.
-- Ergebnis ist unter anderem das Zielkapitel, ab dessen Beginn der State aufgebaut wird.
-
-</Step>
-
-<Step title="State vor dem Zielkapitel ermitteln" icon="arrow-right">
-
-- `get_state_before_chapter_json` berechnet den Story-State direkt vor dem ersten Beat des Zielkapitels.
-- Die Funktion
-  - traversiert die Kapitel-Mainline über `predecessor_chapter_id` bzw. `sort_order`,
-  - zieht Vorgänger-Novels über `predecessor_novel_id` hinzu,
-  - berücksichtigt `is_standalone` als Trennstelle,
-  - holt für alle vorherigen Chapters deren End-State (inklusive Inflows) und
-  - führt Mainline und Inflows mittels `merge_story_states_for_chapter` nach `nexus_mode` zusammen.
-- Zyklenschutz über die Pfadparameter verhindert Endlosschleifen bei fehlerhaften predecessor- oder inflow-Konfigurationen.
-
-</Step>
-
-<Step title="Kapitel-Änderungen bis zum Zielbeat anwenden" icon="arrow-right">
-
-- `apply_chapter_changes_to_state` läuft über alle `story_variable_changes` des Zielkapitels.
-- Die Verarbeitung erfolgt entlang
-  - `scenes.sort_order` und
-  - `beats.sort_order` innerhalb jeder Szene.
-- Der Parameter `net/gross` steuert, ob der Zielbeat selbst in die Auswertung einfließt:
-  - `net`: State direkt vor dem Beat.
-  - `gross`: State inklusive der Änderungen am Beat.
-- Das Ergebnis ist der konsolidierte Story-State am gewünschten Beat.
-
-</Step>
-
-</Steps>
+Die Funktion berücksichtigt dabei die Story-Hierarchie über `beats`, `scenes`, `chapters`, `novels` und `series` hinweg und verwendet `sort_order`, um alle vorherigen Beats bis zum Ziel zu bestimmen. Die eigentliche Berechnung läuft vollständig auf der Datenbank und liefert typischerweise ein JSON-Objekt mit dem konsolidierten Story-State zurück.
 
 <Callout kind="info">
 
-Die Funktion `public.get_story_state_at_beat` kapselt alle oben genannten Schritte. Für technische Analysen der Flow-Logik ist jedoch hilfreich, die beteiligten Teilfunktionen (`get_state_before_chapter_json`, `apply_chapter_changes_to_state`, `merge_story_states_for_chapter`) getrennt im SQL-Code zu betrachten.
+In der aktuell per Migration definierten Implementierung referenziert `public.get_story_state_at_beat` **weder** die Tabelle `chapter_inflows` **noch** das Feld `chapters.nexus_mode`. Beide gehören bereits zum Story-Flow-Datenmodell und zur UI-Konfiguration, fließen aber in dieser konkreten Funktion (noch) nicht in die State-Berechnung ein. Künftige Iterationen können diese Lücke schließen und die Nexus-Informationen in die Beat-Evaluation integrieren.
 
 </Callout>
 
@@ -251,51 +236,54 @@ Die Funktion `public.get_story_state_at_beat` kapselt alle oben genannten Schrit
 
 ## Kapitel 6 — Debugging und Troubleshooting mit SQL
 
-Für die Fehlersuche im Story Flow sind mehrere SQL-Funktionen vorgesehen, die direkt auf der Supabase-Datenbank ausführbar sind.
+Für die Fehlersuche im Story Flow arbeitest du in der Praxis direkt mit SQL auf der Supabase-Datenbank. Typischerweise kombinierst du Funktionsaufrufe auf `public.get_story_state_at_beat` mit direkten Abfragen der Struktur-Tabellen.
 
 ### Typische Debug-Fragen
 
-- Warum hat ein Roman-Ende einen bestimmten Story-State?
-- Wie sieht der State direkt vor oder nach einem Kapitel aus?
+- Wie sieht der State direkt vor oder nach einem Beat aus?
+- Welche Änderungen tragen Kapitel, Szenen und Beats zu einer bestimmten Variable bei?
 - Welche Inflows sind auf ein Chapter konfiguriert?
-- Wie wirkt sich `nexus_mode` auf die Merge-Entscheidung aus?
+- Welcher Nexus-Modus ist für ein bestimmtes Chapter gesetzt?
 
-### Wichtige Debug-Funktionen
-
-- `public.debug_state_after_novel(p_novel_id)`
-  - Liefert den berechneten End-State einer Novel.
-- `public.debug_state_before_chapter(p_chapter_id)`
-  - Zeigt den Story-State direkt vor Beginn eines Chapters.
-- `public.get_story_state_at_beat(p_beat_id, p_mode)`
-  - Haupteinstiegspunkt zur State-Analyse an einem Beat.
+### Einstieg über get_story_state_at_beat
 
 <CodeGroup tabs="Beispiele: Debug-SQL">
 
 ```sql
--- Story-State an einem konkreten Beat (z. B. nett vor dem Beat)
-select * from public.get_story_state_at_beat('BEAT_UUID', 'net');
+-- Story-State an einem konkreten Beat (net: direkt vor dem Beat)
+select *
+from public.get_story_state_at_beat('00000000-0000-0000-0000-00000000abcd', 'net');
 ```
 
 ```sql
--- State vor einem Kapitel; hilfreich, um Mainline + Inflows zu überprüfen
-select * from public.debug_state_before_chapter('CHAPTER_UUID');
+-- Story-State an einem konkreten Beat (gross: inklusive Änderungen am Beat)
+select *
+from public.get_story_state_at_beat('00000000-0000-0000-0000-00000000abcd', 'gross');
 ```
 
 ```sql
--- End-State eines Romans analysieren
-select * from public.debug_state_after_novel('NOVEL_UUID');
+-- Mehrere Beats in einem Kapitel vergleichen
+select
+  b.id as beat_id,
+  public.get_story_state_at_beat(b.id, 'net') as state_before,
+  public.get_story_state_at_beat(b.id, 'gross') as state_after
+from beats b
+where b.scene_id in (
+  select s.id from scenes s where s.chapter_id = '00000000-0000-0000-0000-00000000cafe'
+)
+order by b.sort_order;
 ```
 
 </CodeGroup>
 
 ### Direkte Kontrolle der Flow-Konfiguration
 
-Neben den Debug-Funktionen hilft ein Blick in die strukturellen Tabellen, um Fehlkonfigurationen zu erkennen (z. B. falsche predecessor-IDs oder unerwartete Inflows).
+Neben den Funktionsaufrufen hilft ein Blick in die strukturellen Tabellen, um Fehlkonfigurationen zu erkennen (z. B. falsche predecessor-IDs, unerwartete Inflows oder missverständliche Nexus-Modi).
 
 <CodeGroup tabs="Flow-Konfiguration abfragen">
 
 ```sql
--- Kapitel-Mainline innerhalb einer Novel (inklusive predecessor)
+-- Kapitel-Mainline innerhalb einer Novel (inklusive predecessor und Nexus-Mode)
 select
   c.id,
   c.novel_id,
@@ -304,19 +292,21 @@ select
   c.is_standalone,
   c.nexus_mode
 from chapters c
-where c.novel_id = 'NOVEL_UUID'
+where c.novel_id = '00000000-0000-0000-0000-00000000beef'
 order by c.sort_order;
 ```
 
 ```sql
 -- Alle Inflows auf ein bestimmtes Kapitel
 select
+  ci.id,
   ci.chapter_id,
   ci.inflow_chapter_id,
   ci.sort_order,
-  ci.is_required
+  ci.is_required,
+  ci.created_at
 from chapter_inflows ci
-where ci.chapter_id = 'CHAPTER_UUID';
+where ci.chapter_id = '00000000-0000-0000-0000-00000000cafe';
 ```
 
 ```sql
@@ -327,7 +317,7 @@ select
   s.sort_order,
   s.starts_at
 from scenes s
-where s.chapter_id = 'CHAPTER_UUID'
+where s.chapter_id = '00000000-0000-0000-0000-00000000cafe'
 order by s.starts_at nulls last, s.sort_order;
 ```
 
@@ -335,7 +325,41 @@ order by s.starts_at nulls last, s.sort_order;
 
 <Callout kind="info">
 
-Wenn `debug_state_before_chapter` oder `debug_state_after_novel` keinen erwarteten State liefern, überprüfe zuerst die Verkettung (`predecessor_*`, `sort_order`), dann `is_standalone` und zuletzt `chapter_inflows` und `nexus_mode`. Viele scheinbare Logikfehler sind tatsächlich Konfigurationsprobleme im Flow-Graphen.
+Wenn `public.get_story_state_at_beat` keinen erwarteten State liefert, prüfe zuerst die Story-Hierarchie (`series` → `novels` → `chapters` → `scenes` → `beats`) über `sort_order` und `predecessor_*`. Für Fragen rund um Verzweigungen und Zusammenführungen hilft anschließend ein Blick auf `chapters.is_standalone`, `chapters.nexus_mode` sowie die Einträge in `chapter_inflows`.
+
+</Callout>
+
+---
+
+## UI-Bezug (wo wird das konfiguriert?)
+
+Die oben beschriebenen Felder werden in der Anwendung an mehreren Stellen im UI gepflegt. Für die technische Analyse ist hilfreich zu wissen, welche Oberfläche welches Datenfeld steuert.
+
+- **Chapter-Vorgänger und Standalone-Flag**
+  - Gesteuert im Manuskript-Editor im `ChapterPanel` als Story-Flow-Konnektor.
+  - Technische Datei: `src/pages/Manuscript/panels/ChapterPanel.jsx`
+  - Schreibt insbesondere:
+    - `chapters.predecessor_chapter_id`
+    - `chapters.is_standalone`
+- **Chapter-Inflows und Nexus-Modus**
+  - Gesteuert im Manuskript-Editor im `NexusPanel`.
+  - Technische Datei: `src/pages/Manuscript/panels/NexusPanel.jsx`
+  - Schreibt insbesondere:
+    - `chapter_inflows.chapter_id`
+    - `chapter_inflows.inflow_chapter_id`
+    - `chapter_inflows.sort_order`
+    - `chapter_inflows.is_required`
+    - `chapters.nexus_mode`
+- **Novel-Vorgänger und Standalone-Flag**
+  - Gesteuert auf der Roman-Einstellungsseite über den Story-Flow-Konnektor.
+  - Technische Datei: `src/pages/Novel/NovelSettingsPage.jsx`
+  - Schreibt insbesondere:
+    - `novels.predecessor_novel_id`
+    - `novels.is_standalone`
+
+<Callout kind="info">
+
+Die Dropdown-Optionen im Story-Flow-Konnektor der Novel-Einstellungen (`NovelSettingsPage.jsx`) entsprechen direkt den drei im Datenmodell vorgesehenen Zuständen: automatisch über vorherigen Roman, explizit gewählter Vorgänger-Roman oder eigenständiger Roman ohne Bezug.
 
 </Callout>
 
