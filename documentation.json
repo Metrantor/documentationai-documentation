@@ -68,7 +68,47 @@
               },
               {
                 "group": "Anwendungs-Oberfläche",
-                "pages": []
+                "pages": [
+                  {
+                    "group": "Story States",
+                    "pages": [
+                      {
+                        "title": "Story State Funktionen (Supabase)",
+                        "path": "story-state-funktionen-supabase"
+                      }
+                    ]
+                  },
+                  {
+                    "group": "Story Flow",
+                    "pages": []
+                  },
+                  {
+                    "title": "Überblick",
+                    "path": "anwendungs-oberflaeche-ueberblick"
+                  },
+                  {
+                    "group": "Codex",
+                    "pages": [
+                      {
+                        "title": "Codex",
+                        "path": "anwendungs-oberflaeche-codex"
+                      }
+                    ],
+                    "icon": "lucide-file-stack"
+                  },
+                  {
+                    "title": "Anwendungs Oberflaeche Manuskript Editor",
+                    "path": "anwendungs-oberflaeche-manuskript-editor"
+                  },
+                  {
+                    "title": "Anwendungs Oberflaeche Serien Und Romane",
+                    "path": "anwendungs-oberflaeche-serien-und-romane"
+                  },
+                  {
+                    "group": "Seiten",
+                    "pages": []
+                  }
+                ]
               }
             ]
           },

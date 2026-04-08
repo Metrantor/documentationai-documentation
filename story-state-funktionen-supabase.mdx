@@ -1,0 +1,1014 @@
+---
+title: SQL-Funktionen für die Ermittlung des Story States
+---
+```markdown
+-- =========================================================
+-- FUNKTIONSFAMILIE: STORY STATE AT BEAT
+-- erweitert um predecessor_novel_id / is_standalone auf novels
+-- =========================================================
+
+-- ---------------------------------------------------------
+-- 1. Vollständiger Vergleich zweier State-Einträge
+-- ---------------------------------------------------------
+create or replace function public.compare_story_state_entries(
+  p_left jsonb,
+  p_right jsonb
+)
+returns integer
+language plpgsql
+immutable
+as $$
+declare
+  l_time timestamptz;
+  r_time timestamptz;
+  l_novel int;
+  r_novel int;
+  l_chapter int;
+  r_chapter int;
+  l_scene int;
+  r_scene int;
+  l_beat int;
+  r_beat int;
+  l_change text;
+  r_change text;
+begin
+  if p_left is null and p_right is null then
+    return 0;
+  elsif p_left is null then
+    return -1;
+  elsif p_right is null then
+    return 1;
+  end if;
+
+  l_time := nullif(p_left->>'scene_starts_at', '')::timestamptz;
+  r_time := nullif(p_right->>'scene_starts_at', '')::timestamptz;
+
+  if l_time is null and r_time is not null then
+    return -1;
+  elsif l_time is not null and r_time is null then
+    return 1;
+  elsif l_time is not null and r_time is not null then
+    if l_time < r_time then
+      return -1;
+    elsif l_time > r_time then
+      return 1;
+    end if;
+  end if;
+
+  l_novel := coalesce((p_left->>'novel_sort')::int, -1);
+  r_novel := coalesce((p_right->>'novel_sort')::int, -1);
+  if l_novel < r_novel then return -1; end if;
+  if l_novel > r_novel then return 1; end if;
+
+  l_chapter := coalesce((p_left->>'chapter_sort')::int, -1);
+  r_chapter := coalesce((p_right->>'chapter_sort')::int, -1);
+  if l_chapter < r_chapter then return -1; end if;
+  if l_chapter > r_chapter then return 1; end if;
+
+  l_scene := coalesce((p_left->>'scene_sort')::int, -1);
+  r_scene := coalesce((p_right->>'scene_sort')::int, -1);
+  if l_scene < r_scene then return -1; end if;
+  if l_scene > r_scene then return 1; end if;
+
+  l_beat := coalesce((p_left->>'beat_sort')::int, -1);
+  r_beat := coalesce((p_right->>'beat_sort')::int, -1);
+  if l_beat < r_beat then return -1; end if;
+  if l_beat > r_beat then return 1; end if;
+
+  l_change := coalesce(p_left->>'change_id', '');
+  r_change := coalesce(p_right->>'change_id', '');
+  if l_change < r_change then return -1; end if;
+  if l_change > r_change then return 1; end if;
+
+  return 0;
+end;
+$$;
+
+
+-- ---------------------------------------------------------
+-- 2. Vergleich nur nach Szenenzeit
+-- ---------------------------------------------------------
+create or replace function public.compare_story_state_entries_by_scene_time(
+  p_left jsonb,
+  p_right jsonb
+)
+returns integer
+language plpgsql
+immutable
+as $$
+declare
+  l_time timestamptz;
+  r_time timestamptz;
+begin
+  if p_left is null and p_right is null then
+    return 0;
+  elsif p_left is null then
+    return -1;
+  elsif p_right is null then
+    return 1;
+  end if;
+
+  l_time := nullif(p_left->>'scene_starts_at', '')::timestamptz;
+  r_time := nullif(p_right->>'scene_starts_at', '')::timestamptz;
+
+  if l_time is null and r_time is null then
+    return 0;
+  elsif l_time is null then
+    return -1;
+  elsif r_time is null then
+    return 1;
+  elsif l_time < r_time then
+    return -1;
+  elsif l_time > r_time then
+    return 1;
+  end if;
+
+  return 0;
+end;
+$$;
+
+
+-- ---------------------------------------------------------
+-- 3. Zielkontext zu einem Beat
+-- ---------------------------------------------------------
+create or replace function public.get_story_target_at_beat(
+  p_beat_id uuid
+)
+returns table (
+  series_id uuid,
+  novel_id uuid,
+  novel_sort integer,
+  chapter_id uuid,
+  chapter_sort integer,
+  target_nexus_mode text,
+  scene_id uuid,
+  scene_sort integer,
+  scene_starts_at timestamptz,
+  beat_id uuid,
+  beat_sort integer
+)
+language sql
+stable
+as $$
+  select
+    sr.id                                             as series_id,
+    n.id                                              as novel_id,
+    n.sort_order                                      as novel_sort,
+    c.id                                              as chapter_id,
+    c.sort_order                                      as chapter_sort,
+    coalesce(c.nexus_mode, 'chronological_last_wins') as target_nexus_mode,
+    s.id                                              as scene_id,
+    s.sort_order                                      as scene_sort,
+    s.starts_at                                       as scene_starts_at,
+    b.id                                              as beat_id,
+    b.sort_order                                      as beat_sort
+  from public.beats b
+  join public.scenes   s  on s.id  = b.scene_id
+  join public.chapters c  on c.id  = s.chapter_id
+  join public.novels   n  on n.id  = c.novel_id
+  join public.series   sr on sr.id = n.series_id
+  where b.id = p_beat_id;
+$$;
+
+
+-- ---------------------------------------------------------
+-- 4. Hauptvorgänger eines Kapitels
+-- ---------------------------------------------------------
+create or replace function public.get_main_predecessor_chapter(
+  p_chapter_id uuid
+)
+returns uuid
+language plpgsql
+stable
+as $$
+declare
+  v_chapter record;
+  v_pred uuid;
+begin
+  select
+    c.id,
+    c.novel_id,
+    c.sort_order,
+    c.predecessor_chapter_id,
+    c.is_standalone
+  into v_chapter
+  from public.chapters c
+  where c.id = p_chapter_id;
+
+  if not found then
+    return null;
+  end if;
+
+  if coalesce(v_chapter.is_standalone, false) = true then
+    return null;
+  end if;
+
+  if v_chapter.predecessor_chapter_id is not null then
+    return v_chapter.predecessor_chapter_id;
+  end if;
+
+  select c2.id
+  into v_pred
+  from public.chapters c2
+  where c2.novel_id = v_chapter.novel_id
+    and c2.sort_order < v_chapter.sort_order
+  order by c2.sort_order desc
+  limit 1;
+
+  return v_pred;
+end;
+$$;
+
+
+-- ---------------------------------------------------------
+-- 5. Hauptvorgänger eines Romans
+-- ---------------------------------------------------------
+create or replace function public.get_main_predecessor_novel(
+  p_novel_id uuid
+)
+returns uuid
+language plpgsql
+stable
+as $$
+declare
+  v_novel record;
+  v_pred uuid;
+begin
+  select
+    n.id,
+    n.series_id,
+    n.sort_order,
+    n.predecessor_novel_id,
+    n.is_standalone
+  into v_novel
+  from public.novels n
+  where n.id = p_novel_id;
+
+  if not found then
+    return null;
+  end if;
+
+  if coalesce(v_novel.is_standalone, false) = true then
+    return null;
+  end if;
+
+  if v_novel.predecessor_novel_id is not null then
+    return v_novel.predecessor_novel_id;
+  end if;
+
+  select n2.id
+  into v_pred
+  from public.novels n2
+  where n2.series_id = v_novel.series_id
+    and n2.sort_order < v_novel.sort_order
+  order by n2.sort_order desc
+  limit 1;
+
+  return v_pred;
+end;
+$$;
+
+
+-- ---------------------------------------------------------
+-- 6. Letztes Kapitel eines Romans
+-- ---------------------------------------------------------
+create or replace function public.get_last_chapter_of_novel(
+  p_novel_id uuid
+)
+returns uuid
+language sql
+stable
+as $$
+  select c.id
+  from public.chapters c
+  where c.novel_id = p_novel_id
+  order by c.sort_order desc
+  limit 1;
+$$;
+
+
+-- ---------------------------------------------------------
+-- 7. Inflows eines Kapitels
+-- ---------------------------------------------------------
+create or replace function public.get_chapter_inflows_json(
+  p_chapter_id uuid
+)
+returns jsonb
+language sql
+stable
+as $$
+  select coalesce(
+    jsonb_agg(
+      jsonb_build_object(
+        'inflow_chapter_id', ci.inflow_chapter_id,
+        'sort_order', ci.sort_order,
+        'is_required', ci.is_required
+      )
+      order by ci.sort_order, ci.inflow_chapter_id
+    ),
+    '[]'::jsonb
+  )
+  from public.chapter_inflows ci
+  where ci.chapter_id = p_chapter_id;
+$$;
+
+
+-- ---------------------------------------------------------
+-- 8. Initialzustand aller Story-Variablen
+-- ---------------------------------------------------------
+create or replace function public.get_initial_story_state_json(
+  p_series_id uuid
+)
+returns jsonb
+language sql
+stable
+as $$
+  select coalesce(
+    jsonb_object_agg(
+      sv.id::text,
+      jsonb_build_object(
+        'variable_id', sv.id,
+        'value_json',
+          case
+            when sv.type = 'boolean' then to_jsonb(coalesce(nullif(trim(sv.initial_value), ''), 'false')::boolean)
+            when sv.type = 'integer' then to_jsonb(coalesce(nullif(trim(sv.initial_value), ''), '0')::integer)
+            when sv.type = 'numeric' then to_jsonb(coalesce(nullif(trim(sv.initial_value), ''), '0')::numeric)
+            when sv.type = 'json'    then coalesce(nullif(trim(sv.initial_value), ''), 'null')::jsonb
+            else to_jsonb(coalesce(sv.initial_value, ''))
+          end,
+        'source_type', 'initial_value',
+        'source_change_id', null,
+        'source_beat_id', null,
+        'scene_starts_at', null,
+        'novel_sort', -1,
+        'chapter_sort', -1,
+        'scene_sort', -1,
+        'beat_sort', -1,
+        'change_id', null
+      )
+    ),
+    '{}'::jsonb
+  )
+  from public.story_variables sv
+  where sv.series_id = p_series_id;
+$$;
+
+
+-- ---------------------------------------------------------
+-- 9. Merge von Hauptstrang + Inflows
+-- ---------------------------------------------------------
+create or replace function public.merge_story_states_for_chapter(
+  p_chapter_id uuid,
+  p_main_state jsonb,
+  p_inflow_states_json jsonb
+)
+returns jsonb
+language plpgsql
+stable
+as $$
+declare
+  v_series_id uuid;
+  v_nexus_mode text;
+  v_result jsonb := '{}'::jsonb;
+
+  v_var record;
+
+  v_main_entry jsonb;
+  v_main_source_type text;
+
+  v_inflow_item jsonb;
+  v_inflow_state jsonb;
+  v_inflow_entry jsonb;
+  v_inflow_order int;
+
+  v_best_inflow_change jsonb;
+  v_best_inflow_change_order int;
+
+  v_winner jsonb;
+  v_cmp int;
+  v_time_cmp int;
+begin
+  if coalesce(jsonb_array_length(coalesce(p_inflow_states_json, '[]'::jsonb)), 0) = 0 then
+    return coalesce(p_main_state, '{}'::jsonb);
+  end if;
+
+  select
+    sr.id,
+    coalesce(c.nexus_mode, 'chronological_last_wins')
+  into
+    v_series_id,
+    v_nexus_mode
+  from public.chapters c
+  join public.novels n on n.id = c.novel_id
+  join public.series sr on sr.id = n.series_id
+  where c.id = p_chapter_id;
+
+  if not found then
+    raise exception 'Chapter % not found.', p_chapter_id;
+  end if;
+
+  for v_var in
+    select sv.id
+    from public.story_variables sv
+    where sv.series_id = v_series_id
+    order by sv.sort_order, sv.key
+  loop
+    v_main_entry := p_main_state -> (v_var.id::text);
+    v_main_source_type := coalesce(v_main_entry->>'source_type', 'initial_value');
+
+    if v_nexus_mode = 'mainline_wins' then
+      if v_main_entry is not null and v_main_source_type = 'beat_change' then
+        v_winner := v_main_entry;
+      else
+        v_best_inflow_change := null;
+        v_best_inflow_change_order := null;
+
+        for v_inflow_item in
+          select value
+          from jsonb_array_elements(coalesce(p_inflow_states_json, '[]'::jsonb))
+        loop
+          v_inflow_state := v_inflow_item->'state';
+          v_inflow_order := coalesce((v_inflow_item->>'sort_order')::int, 0);
+          v_inflow_entry := v_inflow_state -> (v_var.id::text);
+
+          if v_inflow_entry is not null
+             and coalesce(v_inflow_entry->>'source_type', 'initial_value') = 'beat_change' then
+            if v_best_inflow_change is null then
+              v_best_inflow_change := v_inflow_entry;
+              v_best_inflow_change_order := v_inflow_order;
+            else
+              v_time_cmp := public.compare_story_state_entries_by_scene_time(v_inflow_entry, v_best_inflow_change);
+
+              if v_time_cmp > 0 then
+                v_best_inflow_change := v_inflow_entry;
+                v_best_inflow_change_order := v_inflow_order;
+              elsif v_time_cmp = 0 then
+                v_cmp := public.compare_story_state_entries(v_inflow_entry, v_best_inflow_change);
+
+                if v_cmp > 0 then
+                  v_best_inflow_change := v_inflow_entry;
+                  v_best_inflow_change_order := v_inflow_order;
+                elsif v_cmp = 0 and v_inflow_order > coalesce(v_best_inflow_change_order, 0) then
+                  v_best_inflow_change := v_inflow_entry;
+                  v_best_inflow_change_order := v_inflow_order;
+                end if;
+              end if;
+            end if;
+          end if;
+        end loop;
+
+        if v_best_inflow_change is not null then
+          v_winner := v_best_inflow_change;
+        else
+          v_winner := coalesce(v_main_entry, p_main_state -> (v_var.id::text));
+        end if;
+      end if;
+
+    else
+      v_winner := v_main_entry;
+
+      for v_inflow_item in
+        select value
+        from jsonb_array_elements(coalesce(p_inflow_states_json, '[]'::jsonb))
+      loop
+        v_inflow_state := v_inflow_item->'state';
+        v_inflow_order := coalesce((v_inflow_item->>'sort_order')::int, 0);
+        v_inflow_entry := v_inflow_state -> (v_var.id::text);
+
+        if v_inflow_entry is null then
+          continue;
+        end if;
+
+        if v_winner is null then
+          v_winner := v_inflow_entry;
+        else
+          v_time_cmp := public.compare_story_state_entries_by_scene_time(v_inflow_entry, v_winner);
+
+          if v_time_cmp > 0 then
+            v_winner := v_inflow_entry;
+          elsif v_time_cmp = 0 then
+            if v_main_entry is not null
+               and public.compare_story_state_entries_by_scene_time(v_main_entry, v_winner) = 0 then
+              v_winner := v_main_entry;
+            else
+              v_cmp := public.compare_story_state_entries(v_inflow_entry, v_winner);
+
+              if v_cmp > 0 then
+                v_winner := v_inflow_entry;
+              elsif v_cmp = 0 then
+                v_winner := v_inflow_entry;
+              end if;
+            end if;
+          end if;
+        end if;
+      end loop;
+    end if;
+
+    if v_winner is not null then
+      v_result := jsonb_set(
+        v_result,
+        array[v_var.id::text],
+        v_winner,
+        true
+      );
+    end if;
+  end loop;
+
+  return v_result;
+end;
+$$;
+
+
+-- ---------------------------------------------------------
+-- 10. Kapitelinterne Changes anwenden
+-- ---------------------------------------------------------
+create or replace function public.apply_chapter_changes_to_state(
+  p_chapter_id uuid,
+  p_base_state jsonb,
+  p_stop_beat_id uuid default null,
+  p_mode text default 'gross'
+)
+returns jsonb
+language plpgsql
+stable
+as $$
+declare
+  v_result jsonb := coalesce(p_base_state, '{}'::jsonb);
+
+  v_chapter record;
+  v_stop record;
+  v_row record;
+begin
+  select
+    c.id,
+    c.sort_order as chapter_sort,
+    n.sort_order as novel_sort
+  into v_chapter
+  from public.chapters c
+  join public.novels n on n.id = c.novel_id
+  where c.id = p_chapter_id;
+
+  if not found then
+    raise exception 'Chapter % not found.', p_chapter_id;
+  end if;
+
+  if p_stop_beat_id is null then
+    for v_row in
+      select
+        svc.id        as change_id,
+        svc.variable_id,
+        svc.value_json,
+        b.id          as beat_id,
+        b.sort_order  as beat_sort,
+        s.id          as scene_id,
+        s.sort_order  as scene_sort,
+        s.starts_at   as scene_starts_at
+      from public.scenes s
+      join public.beats b
+        on b.scene_id = s.id
+      join public.story_variable_changes svc
+        on svc.beat_id = b.id
+      where s.chapter_id = p_chapter_id
+      order by
+        s.sort_order,
+        b.sort_order,
+        svc.id
+    loop
+      v_result := jsonb_set(
+        v_result,
+        array[v_row.variable_id::text],
+        jsonb_build_object(
+          'variable_id', v_row.variable_id,
+          'value_json', v_row.value_json,
+          'source_type', 'beat_change',
+          'source_change_id', v_row.change_id,
+          'source_beat_id', v_row.beat_id,
+          'scene_starts_at', v_row.scene_starts_at,
+          'novel_sort', v_chapter.novel_sort,
+          'chapter_sort', v_chapter.chapter_sort,
+          'scene_sort', v_row.scene_sort,
+          'beat_sort', v_row.beat_sort,
+          'change_id', v_row.change_id
+        ),
+        true
+      );
+    end loop;
+
+    return v_result;
+  end if;
+
+  select
+    b.id as beat_id,
+    b.sort_order as beat_sort,
+    s.id as scene_id,
+    s.sort_order as scene_sort
+  into v_stop
+  from public.beats b
+  join public.scenes s on s.id = b.scene_id
+  where b.id = p_stop_beat_id;
+
+  if not found then
+    raise exception 'Stop beat % not found.', p_stop_beat_id;
+  end if;
+
+  for v_row in
+    select
+      svc.id        as change_id,
+      svc.variable_id,
+      svc.value_json,
+      b.id          as beat_id,
+      b.sort_order  as beat_sort,
+      s.id          as scene_id,
+      s.sort_order  as scene_sort,
+      s.starts_at   as scene_starts_at
+    from public.scenes s
+    join public.beats b
+      on b.scene_id = s.id
+    join public.story_variable_changes svc
+      on svc.beat_id = b.id
+    where s.chapter_id = p_chapter_id
+      and (
+        s.sort_order < v_stop.scene_sort
+        or (
+          s.sort_order = v_stop.scene_sort
+          and (
+            (p_mode = 'net'   and b.sort_order <  v_stop.beat_sort)
+            or
+            (p_mode = 'gross' and b.sort_order <= v_stop.beat_sort)
+          )
+        )
+      )
+    order by
+      s.sort_order,
+      b.sort_order,
+      svc.id
+  loop
+    v_result := jsonb_set(
+      v_result,
+      array[v_row.variable_id::text],
+      jsonb_build_object(
+        'variable_id', v_row.variable_id,
+        'value_json', v_row.value_json,
+        'source_type', 'beat_change',
+        'source_change_id', v_row.change_id,
+        'source_beat_id', v_row.beat_id,
+        'scene_starts_at', v_row.scene_starts_at,
+        'novel_sort', v_chapter.novel_sort,
+        'chapter_sort', v_chapter.chapter_sort,
+        'scene_sort', v_row.scene_sort,
+        'beat_sort', v_row.beat_sort,
+        'change_id', v_row.change_id
+      ),
+      true
+    );
+  end loop;
+
+  return v_result;
+end;
+$$;
+
+
+-- ---------------------------------------------------------
+-- 11. Zustand NACH dem letzten Kapitel eines Romans
+-- ---------------------------------------------------------
+create or replace function public.get_state_after_novel_json(
+  p_novel_id uuid,
+  p_path_novels uuid[] default array[]::uuid[],
+  p_path_chapters uuid[] default array[]::uuid[]
+)
+returns jsonb
+language plpgsql
+stable
+as $$
+declare
+  v_last_chapter_id uuid;
+  v_before_last jsonb;
+  v_after_last jsonb;
+begin
+  v_last_chapter_id := public.get_last_chapter_of_novel(p_novel_id);
+
+  if v_last_chapter_id is null then
+    return '{}'::jsonb;
+  end if;
+
+  v_before_last := public.get_state_before_chapter_json(
+    v_last_chapter_id,
+    p_path_chapters,
+    p_path_novels
+  );
+
+  v_after_last := public.apply_chapter_changes_to_state(
+    v_last_chapter_id,
+    v_before_last,
+    null,
+    'gross'
+  );
+
+  return v_after_last;
+end;
+$$;
+
+
+-- ---------------------------------------------------------
+-- 12. Zustand VOR Beginn eines Kapitels
+--     JETZT mit Romanvorgänger-Logik
+-- ---------------------------------------------------------
+create or replace function public.get_state_before_chapter_json(
+  p_chapter_id uuid,
+  p_path_chapters uuid[] default array[]::uuid[],
+  p_path_novels uuid[] default array[]::uuid[]
+)
+returns jsonb
+language plpgsql
+stable
+as $$
+declare
+  v_chapter record;
+  v_series_id uuid;
+  v_pred_id uuid;
+
+  v_main_before jsonb;
+  v_main_after jsonb;
+
+  v_novel_pred_id uuid;
+  v_inflows jsonb;
+  v_inflow_item jsonb;
+  v_inflow_chapter_id uuid;
+  v_inflow_before jsonb;
+  v_inflow_after jsonb;
+  v_inflow_states jsonb := '[]'::jsonb;
+
+  v_merged jsonb;
+begin
+  if p_chapter_id = any(p_path_chapters) then
+    raise exception 'Cycle detected in chapter flow at chapter %', p_chapter_id;
+  end if;
+
+  select
+    c.id,
+    c.novel_id,
+    c.sort_order,
+    c.predecessor_chapter_id,
+    c.is_standalone,
+    coalesce(c.nexus_mode, 'chronological_last_wins') as nexus_mode,
+    sr.id as series_id
+  into v_chapter
+  from public.chapters c
+  join public.novels n on n.id = c.novel_id
+  join public.series sr on sr.id = n.series_id
+  where c.id = p_chapter_id;
+
+  if not found then
+    raise exception 'Chapter % not found.', p_chapter_id;
+  end if;
+
+  v_series_id := v_chapter.series_id;
+  v_pred_id := public.get_main_predecessor_chapter(p_chapter_id);
+
+  if v_pred_id is not null then
+    v_main_before := public.get_state_before_chapter_json(
+      v_pred_id,
+      p_path_chapters || p_chapter_id,
+      p_path_novels
+    );
+
+    v_main_after := public.apply_chapter_changes_to_state(
+      v_pred_id,
+      v_main_before,
+      null,
+      'gross'
+    );
+  else
+    -- kein Kapitelvorgänger innerhalb des Romans
+    v_novel_pred_id := public.get_main_predecessor_novel(v_chapter.novel_id);
+
+    if v_novel_pred_id is null then
+      v_main_after := public.get_initial_story_state_json(v_series_id);
+    else
+      if v_novel_pred_id = any(p_path_novels) then
+        raise exception 'Cycle detected in novel flow at novel %', v_novel_pred_id;
+      end if;
+
+      v_main_after := public.get_state_after_novel_json(
+        v_novel_pred_id,
+        p_path_novels || v_chapter.novel_id,
+        p_path_chapters
+      );
+    end if;
+  end if;
+
+  v_inflows := public.get_chapter_inflows_json(p_chapter_id);
+
+  for v_inflow_item in
+    select value
+    from jsonb_array_elements(v_inflows)
+  loop
+    v_inflow_chapter_id := (v_inflow_item->>'inflow_chapter_id')::uuid;
+
+    v_inflow_before := public.get_state_before_chapter_json(
+      v_inflow_chapter_id,
+      p_path_chapters || p_chapter_id,
+      p_path_novels
+    );
+
+    v_inflow_after := public.apply_chapter_changes_to_state(
+      v_inflow_chapter_id,
+      v_inflow_before,
+      null,
+      'gross'
+    );
+
+    v_inflow_states := v_inflow_states || jsonb_build_array(
+      jsonb_build_object(
+        'sort_order', coalesce((v_inflow_item->>'sort_order')::int, 0),
+        'is_required', coalesce((v_inflow_item->>'is_required')::boolean, true),
+        'inflow_chapter_id', v_inflow_chapter_id,
+        'state', v_inflow_after
+      )
+    );
+  end loop;
+
+  v_merged := public.merge_story_states_for_chapter(
+    p_chapter_id,
+    v_main_after,
+    v_inflow_states
+  );
+
+  return v_merged;
+end;
+$$;
+
+
+-- ---------------------------------------------------------
+-- 13. Hauptfunktion
+-- ---------------------------------------------------------
+create or replace function public.get_story_state_at_beat(
+  p_beat_id uuid,
+  p_mode text default 'net'
+)
+returns table (
+  variable_id uuid,
+  variable_key text,
+  variable_label text,
+  value_json jsonb,
+  source_type text,
+  source_change_id uuid,
+  source_beat_id uuid
+)
+language plpgsql
+stable
+as $$
+declare
+  v_target record;
+  v_before jsonb;
+  v_final jsonb;
+begin
+  select *
+  into v_target
+  from public.get_story_target_at_beat(p_beat_id);
+
+  if not found then
+    raise exception 'Beat % not found.', p_beat_id;
+  end if;
+
+  v_before := public.get_state_before_chapter_json(
+    v_target.chapter_id,
+    array[]::uuid[],
+    array[]::uuid[]
+  );
+
+  v_final := public.apply_chapter_changes_to_state(
+    v_target.chapter_id,
+    v_before,
+    p_beat_id,
+    p_mode
+  );
+
+  return query
+  select
+    sv.id as variable_id,
+    sv.key as variable_key,
+    sv.label as variable_label,
+    coalesce(
+      (v_final -> sv.id::text -> 'value_json'),
+      case
+        when sv.type = 'boolean' then to_jsonb(coalesce(nullif(trim(sv.initial_value), ''), 'false')::boolean)
+        when sv.type = 'integer' then to_jsonb(coalesce(nullif(trim(sv.initial_value), ''), '0')::integer)
+        when sv.type = 'numeric' then to_jsonb(coalesce(nullif(trim(sv.initial_value), ''), '0')::numeric)
+        when sv.type = 'json'    then coalesce(nullif(trim(sv.initial_value), ''), 'null')::jsonb
+        else to_jsonb(coalesce(sv.initial_value, ''))
+      end
+    ) as value_json,
+    case
+      when (v_final -> sv.id::text ->> 'source_change_id') is null then 'initial_value'
+      else 'beat_change'
+    end as source_type,
+    nullif(v_final -> sv.id::text ->> 'source_change_id', '')::uuid as source_change_id,
+    nullif(v_final -> sv.id::text ->> 'source_beat_id', '')::uuid as source_beat_id
+  from public.story_variables sv
+  where sv.series_id = v_target.series_id
+  order by sv.sort_order, sv.key;
+end;
+$$;
+
+
+-- ---------------------------------------------------------
+-- 14. Debug-Helfer: Zustand vor Kapitel
+-- ---------------------------------------------------------
+create or replace function public.debug_state_before_chapter(
+  p_chapter_id uuid
+)
+returns table (
+  variable_id uuid,
+  value_json jsonb,
+  source_type text,
+  source_change_id uuid,
+  source_beat_id uuid
+)
+language plpgsql
+stable
+as $$
+declare
+  v_state jsonb;
+  v_series_id uuid;
+begin
+  select sr.id
+  into v_series_id
+  from public.chapters c
+  join public.novels n on n.id = c.novel_id
+  join public.series sr on sr.id = n.series_id
+  where c.id = p_chapter_id;
+
+  if v_series_id is null then
+    raise exception 'Chapter % not found.', p_chapter_id;
+  end if;
+
+  v_state := public.get_state_before_chapter_json(
+    p_chapter_id,
+    array[]::uuid[],
+    array[]::uuid[]
+  );
+
+  return query
+  select
+    sv.id,
+    v_state -> sv.id::text -> 'value_json' as value_json,
+    coalesce(v_state -> sv.id::text ->> 'source_type', 'initial_value') as source_type,
+    nullif(v_state -> sv.id::text ->> 'source_change_id', '')::uuid as source_change_id,
+    nullif(v_state -> sv.id::text ->> 'source_beat_id', '')::uuid as source_beat_id
+  from public.story_variables sv
+  where sv.series_id = v_series_id
+  order by sv.sort_order, sv.key;
+end;
+$$;
+
+
+-- ---------------------------------------------------------
+-- 15. Debug-Helfer: Zustand nach Roman
+-- ---------------------------------------------------------
+create or replace function public.debug_state_after_novel(
+  p_novel_id uuid
+)
+returns table (
+  variable_id uuid,
+  value_json jsonb,
+  source_type text,
+  source_change_id uuid,
+  source_beat_id uuid
+)
+language plpgsql
+stable
+as $$
+declare
+  v_state jsonb;
+  v_series_id uuid;
+begin
+  select n.series_id
+  into v_series_id
+  from public.novels n
+  where n.id = p_novel_id;
+
+  if v_series_id is null then
+    raise exception 'Novel % not found.', p_novel_id;
+  end if;
+
+  v_state := public.get_state_after_novel_json(
+    p_novel_id,
+    array[]::uuid[],
+    array[]::uuid[]
+  );
+
+  return query
+  select
+    sv.id,
+    v_state -> sv.id::text -> 'value_json' as value_json,
+    coalesce(v_state -> sv.id::text ->> 'source_type', 'initial_value') as source_type,
+    nullif(v_state -> sv.id::text ->> 'source_change_id', '')::uuid as source_change_id,
+    nullif(v_state -> sv.id::text ->> 'source_beat_id', '')::uuid as source_beat_id
+  from public.story_variables sv
+  where sv.series_id = v_series_id
+  order by sv.sort_order, sv.key;
+end;
+$$;
+```
+
