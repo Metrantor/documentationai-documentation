@@ -1,0 +1,1015 @@
+---
+title: Beschreibung der Story State Funktionen
+---
+# Dokumentation der Story-State-Funktionen in Supabase
+
+## Überblick
+
+Diese Funktionsfamilie dient dazu, **den gültigen Zustand aller Story-Variablen zu einem bestimmten Beat** zu ermitteln.
+
+Sie ist für ein Schreib- und Planungssystem gedacht, in dem:
+
+- eine **Serie** mehrere **Romane** enthält
+
+- ein **Roman** mehrere **Kapitel** enthält
+
+- ein **Kapitel** mehrere **Szenen** enthält
+
+- eine **Szene** mehrere **Beats** enthält
+
+- **Story-Variablen** durch Änderungen an bestimmten Beats gesetzt oder verändert werden
+
+- Kapitel über einen **Hauptstrang** und optionale **Inflows** miteinander verknüpft sind
+
+- Romane ebenfalls über **Vorgängerromane** verknüpft sein können
+
+Ziel ist, dass zu jedem Beat exakt berechnet werden kann:
+
+- welche Variablenwerte zu diesem Zeitpunkt gelten
+
+- aus welchem Change sie stammen
+
+- ob sie aus dem Hauptstrang, einem Inflow oder aus einem Vorgängerroman übernommen wurden
+
+---
+
+# Wozu diese Funktionsfamilie genutzt werden kann
+
+Die Funktionen können für mehrere Zwecke genutzt werden:
+
+## 1. Kontextaufbau für KI-Prompts
+
+Vor dem Schreiben eines Beats kann automatisch ermittelt werden:
+
+- welche Zustände in der Story bereits gelten
+
+- welche Figuren, Objekte oder Ereignisse bereits eingetreten sind
+
+- welche Voraussetzungen im Plot schon erfüllt sind
+
+## 2. Bedingte Prompt-Logik
+
+Ein Prompt kann auf Basis des Story-Zustands entscheiden:
+
+- ob bestimmte Hinweise genannt werden dürfen
+
+- ob bestimmte Ereignisse bereits bekannt sind
+
+- ob ein Schreibstil, Fokus oder eine inhaltliche Vorgabe aktiviert werden soll
+
+## 3. Story-Konsistenz
+
+Die Funktionen helfen sicherzustellen, dass spätere Szenen nur mit Informationen arbeiten, die vorher logisch etabliert wurden.
+
+## 4. Debugging von Storyflows
+
+Mit den Debug-Funktionen kann man prüfen:
+
+- welcher Zustand vor einem Kapitel gilt
+
+- welcher Zustand nach einem Roman gilt
+
+- ob Vorgängerbeziehungen und Nexus-Regeln korrekt arbeiten
+
+---
+
+# Architektur der Datenlogik
+
+## Hierarchie
+
+Die Funktionen gehen von folgender Struktur aus:
+
+- `series`
+
+- `novels`
+
+- `chapters`
+
+- `scenes`
+
+- `beats`
+
+Zusätzlich gibt es:
+
+- `story_variables`
+
+- `story_variable_changes`
+
+- `chapter_inflows`
+
+## Grundprinzip
+
+Eine Story-Variable hat:
+
+- einen Initialwert in `story_variables`
+
+- null oder mehr Änderungen in `story_variable_changes`
+
+Jede Änderung hängt an einem **konkreten Beat** über `beat_id`.
+
+Der Zustand zu einem Zielbeat ergibt sich dann aus:
+
+1. Initialwerten
+
+2. allen relevanten Änderungen in Vorgängerromanen
+
+3. allen relevanten Änderungen in Vorgängerkapiteln
+
+4. Nexus-Zusammenführungen über Inflows
+
+5. Änderungen im Zielkapitel bis zum Zielbeat
+
+---
+
+# Tabellen, auf die sich die Funktionen stützen
+
+## `story_variables`
+
+Enthält die Definitionen der Variablen:
+
+- `id`
+
+- `series_id`
+
+- `key`
+
+- `label`
+
+- `type`
+
+- `initial_value`
+
+- `sort_order`
+
+## `story_variable_changes`
+
+Enthält Änderungen an Variablen.
+
+Relevant sind insbesondere:
+
+- `id`
+
+- `variable_id`
+
+- `beat_id`
+
+- `value_json`
+
+Optional können zusätzlich vorhanden sein:
+
+- `novel_id`
+
+- `chapter_id`
+
+- `scene_id`
+
+- `beat_index`
+
+- `note`
+
+Die Laufzeitlogik verwendet vor allem `beat_id`.
+
+## `chapters`
+
+Wichtige Felder:
+
+- `id`
+
+- `novel_id`
+
+- `sort_order`
+
+- `predecessor_chapter_id`
+
+- `is_standalone`
+
+- `nexus_mode`
+
+## `chapter_inflows`
+
+Wichtige Felder:
+
+- `chapter_id`
+
+- `inflow_chapter_id`
+
+- `sort_order`
+
+- `is_required`
+
+## `novels`
+
+Wichtige Felder:
+
+- `id`
+
+- `series_id`
+
+- `sort_order`
+
+- `predecessor_novel_id`
+
+- `is_standalone`
+
+## `scenes`
+
+Wichtige Felder:
+
+- `id`
+
+- `chapter_id`
+
+- `sort_order`
+
+- `starts_at`
+
+## `beats`
+
+Wichtige Felder:
+
+- `id`
+
+- `scene_id`
+
+- `sort_order`
+
+---
+
+# Wie die Funktionen in Supabase verankert sind
+
+Alle Funktionen sind **PostgreSQL-Funktionen im Schema&#x20;**`public` und werden mit
+
+- `language sql`
+
+- oder `language plpgsql`
+
+in der Datenbank selbst gespeichert.
+
+Sie werden typischerweise im SQL-Editor von Supabase angelegt.
+
+Das bedeutet:
+
+- sie laufen **direkt in der Datenbank**
+
+- sie können per `select` aufgerufen werden
+
+- sie können aus Supabase-Clients, n8n, RPC-ähnlichen Aufrufen oder aus SQL heraus verwendet werden
+
+Beispiel:
+
+```typescript
+select *
+from public.get_story_state_at_beat('BEAT_UUID', 'net');
+
+```
+
+---
+
+# Überblick über alle Funktionen
+
+## 1. `compare_story_state_entries(p_left jsonb, p_right jsonb)`
+
+### Zweck
+
+Vergleicht zwei State-Einträge vollständig und deterministisch.
+
+### Wozu sie dient
+
+Diese Funktion wird verwendet, wenn zwei Zustände nach einer vollständigen Reihenfolge verglichen werden sollen.
+
+### Verglichen wird nach:
+
+1. `scene_starts_at`
+
+2. `novel_sort`
+
+3. `chapter_sort`
+
+4. `scene_sort`
+
+5. `beat_sort`
+
+6. `change_id`
+
+### Rückgabewerte
+
+- `-1` → linkes Element ist älter/kleiner
+
+- `0` → gleich
+
+- `1` → linkes Element ist neuer/größer
+
+### Typische Nutzung
+
+- stabile Tie-Breaker
+
+- Vergleich zwischen zwei inflows mit gleicher Szenenzeit
+
+- allgemeine Ordnung von Änderungen
+
+---
+
+## 2. `compare_story_state_entries_by_scene_time(p_left jsonb, p_right jsonb)`
+
+### Zweck
+
+Vergleicht zwei State-Einträge **nur nach Szenenzeit**.
+
+### Wozu sie dient
+
+Diese Funktion ist speziell für **Nexus-Entscheidungen** gedacht.
+
+### Warum sie wichtig ist
+
+Bei der Zusammenführung verschiedener Stränge soll oft nur zählen:
+
+- welche Szene später liegt
+
+Nicht aber:
+
+- welcher Beat innerhalb dieser Szene später liegt
+
+Dadurch kann bei gleicher Szenenzeit sauber die Regel greifen:
+
+- **Hauptstrang gewinnt**
+
+### Rückgabewerte
+
+- `-1` → linkes Element ist zeitlich früher
+
+- `0` → gleiche Szenenzeit
+
+- `1` → linkes Element ist zeitlich später
+
+---
+
+## 3. `get_story_target_at_beat(p_beat_id uuid)`
+
+### Zweck
+
+Liefert den kompletten Zielkontext für einen Beat.
+
+### Rückgabe
+
+- `series_id`
+
+- `novel_id`
+
+- `novel_sort`
+
+- `chapter_id`
+
+- `chapter_sort`
+
+- `target_nexus_mode`
+
+- `scene_id`
+
+- `scene_sort`
+
+- `scene_starts_at`
+
+- `beat_id`
+
+- `beat_sort`
+
+### Wozu sie dient
+
+Diese Funktion ist der Einstieg, um von einem Beat aus den gesamten Storykontext zu bestimmen.
+
+### Typische Nutzung
+
+Sie wird intern von `get_story_state_at_beat(...)` verwendet.
+
+---
+
+## 4. `get_main_predecessor_chapter(p_chapter_id uuid)`
+
+### Zweck
+
+Bestimmt den Hauptvorgänger eines Kapitels.
+
+### Logik
+
+1. Wenn `is_standalone = true` → kein Vorgänger
+
+2. Wenn `predecessor_chapter_id` gesetzt ist → dieser Wert
+
+3. Sonst Fallback:
+
+   - Kapitel mit nächstniedrigerer `sort_order` im selben Roman
+
+### Wozu sie dient
+
+Sie definiert den **linearen Hauptstrang** zwischen Kapiteln.
+
+---
+
+## 5. `get_main_predecessor_novel(p_novel_id uuid)`
+
+### Zweck
+
+Bestimmt den Hauptvorgänger eines Romans.
+
+### Logik
+
+1. Wenn `is_standalone = true` → kein Vorgänger
+
+2. Wenn `predecessor_novel_id` gesetzt ist → dieser Wert
+
+3. Sonst Fallback:
+
+   - Roman mit nächstniedrigerer `sort_order` in derselben Serie
+
+### Wozu sie dient
+
+Damit kann ein Roman auf dem Zustand eines Vorgängerromans aufbauen.
+
+---
+
+## 6. `get_last_chapter_of_novel(p_novel_id uuid)`
+
+### Zweck
+
+Liefert das letzte Kapitel eines Romans.
+
+### Logik
+
+- Kapitel mit der höchsten `sort_order` im Roman
+
+### Wozu sie dient
+
+Wird gebraucht, um den Zustand **nach einem Roman** zu bestimmen.
+
+---
+
+## 7. `get_chapter_inflows_json(p_chapter_id uuid)`
+
+### Zweck
+
+Lädt alle inflows eines Kapitels als JSON-Array.
+
+### Rückgabeformat
+
+Ein JSON-Array mit Objekten wie:
+
+```typescript
+[
+  {
+    "inflow_chapter_id": "...",
+    "sort_order": 1,
+    "is_required": true
+  }
+]
+
+```
+
+### Wozu sie dient
+
+Sie liefert die Grundlage für Kapitel-Nexus-Zusammenführungen.
+
+---
+
+## 8. `get_initial_story_state_json(p_series_id uuid)`
+
+### Zweck
+
+Erzeugt den Initialzustand aller Story-Variablen einer Serie.
+
+### Rückgabe
+
+Ein JSON-Objekt, dessen Schlüssel die `variable_id` ist.
+
+Jeder Eintrag enthält unter anderem:
+
+- `variable_id`
+
+- `value_json`
+
+- `source_type = initial_value`
+
+- `source_change_id = null`
+
+- `source_beat_id = null`
+
+### Wozu sie dient
+
+Das ist der Startzustand der Auswertung, wenn kein Vorgängerroman und kein Vorgängerkapitel existiert.
+
+---
+
+## 9. `merge_story_states_for_chapter(...)`
+
+### Parameter
+
+- `p_chapter_id uuid`
+
+- `p_main_state jsonb`
+
+- `p_inflow_states_json jsonb`
+
+### Zweck
+
+Führt den Hauptzustand und die inflow-Zustände für ein Kapitel zusammen.
+
+### Wozu sie dient
+
+Diese Funktion ist das Herzstück der **Nexus-Logik**.
+
+### Wie sie arbeitet
+
+#### Fall A: keine inflows
+
+Wenn keine inflows vorhanden sind, wird `p_main_state` unverändert zurückgegeben.
+
+#### Fall B: `mainline_wins`
+
+Wenn `nexus_mode = 'mainline_wins'` gilt:
+
+- Hauptstrang gewinnt, wenn dort ein echter Beat-Change vorliegt
+
+- sonst kann ein inflow gewinnen
+
+#### Fall C: `chronological_last_wins`
+
+Wenn `nexus_mode = 'chronological_last_wins'` gilt:
+
+- spätere `scene_starts_at` gewinnt
+
+- bei gleicher `scene_starts_at` gewinnt der Hauptstrang
+
+- bei inflow-vs-inflow-Gleichstand greift ein weiterer Vergleich
+
+### Wichtiger Hinweis
+
+`is_required` wird aktuell **mitgeführt**, aber noch nicht fachlich aktiv ausgewertet.
+
+---
+
+## 10. `apply_chapter_changes_to_state(...)`
+
+### Parameter
+
+- `p_chapter_id uuid`
+
+- `p_base_state jsonb`
+
+- `p_stop_beat_id uuid default null`
+
+- `p_mode text default 'gross'`
+
+### Zweck
+
+Wendet alle Story-Variable-Changes eines Kapitels auf einen vorhandenen Zustand an.
+
+### Wozu sie dient
+
+Diese Funktion übernimmt die **kapitelinterne Fortschreibung**.
+
+### Wie sie arbeitet
+
+#### Wenn `p_stop_beat_id is null`
+
+Dann werden alle Changes des gesamten Kapitels angewendet.
+
+#### Wenn `p_stop_beat_id` gesetzt ist
+
+Dann wird nur bis zu diesem Beat ausgewertet.
+
+### Bedeutung von `p_mode`
+
+#### `gross`
+
+Der Zielbeat wird **einschließlich** berücksichtigt.
+
+#### `net`
+
+Der Zielbeat wird **exklusiv** behandelt.
+
+### Wichtig
+
+Die Funktion arbeitet über:
+
+```typescript
+story_variable_changes.beat_id = beats.id
+
+```
+
+Damit sind die Changes eindeutig an konkrete Beats gebunden.
+
+---
+
+## 11. `get_state_after_novel_json(...)`
+
+### Parameter
+
+- `p_novel_id uuid`
+
+- `p_path_novels uuid[] default array[]::uuid[]`
+
+- `p_path_chapters uuid[] default array[]::uuid[]`
+
+### Zweck
+
+Ermittelt den Zustand **nach dem letzten Kapitel eines Romans**.
+
+### Wozu sie dient
+
+Sie wird verwendet, wenn ein späterer Roman auf einem Vorgängerroman aufbauen soll.
+
+### Logik
+
+1. Letztes Kapitel des Romans bestimmen
+
+2. Zustand vor diesem Kapitel ermitteln
+
+3. Kapitel vollständig anwenden
+
+4. Ergebnis zurückgeben
+
+---
+
+## 12. `get_state_before_chapter_json(...)`
+
+### Parameter
+
+- `p_chapter_id uuid`
+
+- `p_path_chapters uuid[] default array[]::uuid[]`
+
+- `p_path_novels uuid[] default array[]::uuid[]`
+
+### Zweck
+
+Ermittelt den Zustand **vor Beginn eines Kapitels**.
+
+### Wozu sie dient
+
+Das ist die zentrale rekursive Funktion der ganzen Familie.
+
+### Wie sie arbeitet
+
+#### Fall A: Kapitel hat Hauptvorgänger
+
+Dann:
+
+1. Zustand vor Vorgängerkapitel ermitteln
+
+2. Vorgängerkapitel vollständig anwenden
+
+3. Ergebnis als Hauptzustand übernehmen
+
+#### Fall B: Kapitel hat keinen Hauptvorgänger
+
+Dann wird geprüft:
+
+- hat der Roman einen Vorgängerroman?
+
+##### Wenn ja:
+
+- Zustand nach dem letzten Kapitel des Vorgängerromans verwenden
+
+##### Wenn nein:
+
+- Initialzustand verwenden
+
+#### Danach
+
+- inflows laden
+
+- inflow-Zustände rekursiv berechnen
+
+- Hauptzustand + inflows per Nexus-Logik zusammenführen
+
+### Zyklen
+
+Die Funktion erkennt Zyklen über:
+
+- `p_path_chapters`
+
+- `p_path_novels`
+
+und wirft dann eine Exception.
+
+---
+
+## 13. `get_story_state_at_beat(...)`
+
+### Parameter
+
+- `p_beat_id uuid`
+
+- `p_mode text default 'net'`
+
+### Zweck
+
+Liefert den vollständigen Storyzustand zu einem konkreten Beat.
+
+### Rückgabe
+
+Eine Tabellenstruktur mit:
+
+- `variable_id`
+
+- `variable_key`
+
+- `variable_label`
+
+- `value_json`
+
+- `source_type`
+
+- `source_change_id`
+
+- `source_beat_id`
+
+### Wozu sie dient
+
+Das ist die Hauptfunktion für die Anwendung.
+
+### Typische Nutzung
+
+- Aufbau von Prompt-Kontext
+
+- Story-Logik
+
+- Debugging
+
+- Bedingungsprüfung
+
+### Wie sie arbeitet
+
+1. Zielkontext des Beats holen
+
+2. Zustand vor dem Kapitel berechnen
+
+3. Kapitel bis zum Zielbeat anwenden
+
+4. Ergebnis als Tabelle zurückgeben
+
+---
+
+## 14. `debug_state_before_chapter(...)`
+
+### Parameter
+
+- `p_chapter_id uuid`
+
+### Zweck
+
+Zeigt den Zustand vor einem Kapitel tabellarisch an.
+
+### Wozu sie dient
+
+Zum Debuggen und Prüfen, ob:
+
+- Kapitelvorgänger korrekt funktionieren
+
+- Nexus-Zusammenführungen stimmen
+
+- Vorgängerromane sauber übernommen werden
+
+---
+
+## 15. `debug_state_after_novel(...)`
+
+### Parameter
+
+- `p_novel_id uuid`
+
+### Zweck
+
+Zeigt den Zustand nach einem Roman tabellarisch an.
+
+### Wozu sie dient
+
+Zum Debuggen der Romanverkettung.
+
+---
+
+# Bedeutung der wichtigsten Parameter
+
+## `p_beat_id`
+
+Die UUID des Zielbeats.
+
+### Bedeutung
+
+Bestimmt den Punkt in der Story, zu dem der Zustand ermittelt werden soll.
+
+---
+
+## `p_mode`
+
+Erlaubte Werte:
+
+- `net`
+
+- `gross`
+
+### Bedeutung
+
+Steuert, ob der Zielbeat selbst schon mitgezählt wird.
+
+#### `net`
+
+Der Zustand **vor** dem Zielbeat
+
+#### `gross`
+
+Der Zustand **einschließlich** des Zielbeats
+
+---
+
+## `p_chapter_id`
+
+Die UUID eines Kapitels.
+
+### Bedeutung
+
+Wird verwendet, um Zustände vor einem Kapitel oder Merge-Logiken auf Kapitelbasis zu berechnen.
+
+---
+
+## `p_novel_id`
+
+Die UUID eines Romans.
+
+### Bedeutung
+
+Wird verwendet, um Zustände nach einem Roman oder Vorgängerromane zu berechnen.
+
+---
+
+## `p_path_chapters`, `p_path_novels`
+
+Interne Rekursionspfade.
+
+### Bedeutung
+
+Sie verhindern Endlosschleifen bei fehlerhaften Verkettungen.
+
+### Hinweis
+
+Diese Parameter werden im normalen Gebrauch nicht manuell gesetzt.
+
+---
+
+# Wichtige fachliche Regeln
+
+## Kapitel-Hauptstrang
+
+Ein Kapitel folgt:
+
+1. explizit `predecessor_chapter_id`
+
+2. sonst implizit über `sort_order`
+
+3. außer `is_standalone = true`
+
+## Roman-Hauptstrang
+
+Ein Roman folgt:
+
+1. explizit `predecessor_novel_id`
+
+2. sonst implizit über `sort_order`
+
+3. außer `is_standalone = true`
+
+## Nexus-Regeln
+
+### `mainline_wins`
+
+Hauptstrang hat Vorrang.
+
+### `chronological_last_wins`
+
+Spätere `scene.starts_at` gewinnt.
+
+### Gleichstand
+
+Bei gleicher `scene.starts_at` gewinnt der Hauptstrang.
+
+---
+
+# Worauf zu achten ist
+
+## 1. `scene.starts_at` ist fachlich wichtig
+
+Die Zeit einer Szene entscheidet in `chronological_last_wins` über inflow-vs-mainline.
+
+Wenn die Zeiten nicht sauber gesetzt sind, wirkt die Nexus-Logik nicht sinnvoll.
+
+## 2. `story_variable_changes` sollte über `beat_id` gepflegt werden
+
+Das ist das führende Modell.
+
+Andere Felder wie:
+
+- `novel_id`
+
+- `chapter_id`
+
+- `scene_id`
+
+- `beat_index`
+
+können ergänzend vorhanden sein, sind aber für die Kernlogik nicht entscheidend.
+
+## 3. JSON-Format von `value_json`
+
+Die Funktionen geben `value_json` so zurück, wie es gespeichert ist.
+
+Wenn deine Anwendung Werte in der Form erwartet:
+
+```typescript
+{"value":"4"}
+
+```
+
+dann müssen die Changes auch genau so gespeichert werden.
+
+## 4. `is_required` bei inflows
+
+Dieses Feld ist aktuell noch nicht aktiv in der Merge-Entscheidung umgesetzt.
+
+## 5. Keine Zyklen erzeugen
+
+Es darf keine zirkulären Vorgängerbeziehungen geben:
+
+- weder bei Kapiteln
+
+- noch bei Romanen
+
+Die Funktionen brechen in solchen Fällen mit einer Exception ab.
+
+---
+
+# Typische Beispiele
+
+## Zustand an einem Beat ermitteln
+
+```typescript
+select *
+from public.get_story_state_at_beat('BEAT_UUID', 'net');
+
+```
+
+## Zustand vor einem Kapitel prüfen
+
+```typescript
+select *
+from public.debug_state_before_chapter('CHAPTER_UUID');
+
+```
+
+## Zustand nach einem Roman prüfen
+
+```typescript
+select *
+from public.debug_state_after_novel('NOVEL_UUID');
+
+```
+
+---
+
+# Zusammenfassung
+
+Diese Funktionsfamilie bildet eine vollständige Zustandslogik für ein mehrstufiges Storysystem in Supabase ab.
+
+Sie unterstützt:
+
+- Serien
+
+- Vorgängerromane
+
+- Kapitelverkettung
+
+- Inflows / Nexus
+
+- Beat-genaue Story-Variablen
+
+- Debugging von Storyzuständen
+
+Der wichtigste operative Einstieg ist:
+
+- `public.get_story_state_at_beat(...)`
+
+Die wichtigsten internen Kernfunktionen sind:
+
+- `get_state_before_chapter_json(...)`
+
+- `apply_chapter_changes_to_state(...)`
+
+- `merge_story_states_for_chapter(...)`
+
+Die Romanebene wird zusätzlich über:
+
+- `get_main_predecessor_novel(...)`
+
+- `get_state_after_novel_json(...)`
+
+in die Gesamtlogik eingebunden.
+
+Wenn du willst, formatiere ich dir das im nächsten Schritt auch noch als **technische Doku mit Inhaltsverzeichnis und nummerierten Codeblöcken**.

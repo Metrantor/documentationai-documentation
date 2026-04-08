@@ -1,0 +1,988 @@
+---
+title: Technische Dokumentation der Story-State-Funktionsfamilie
+---
+#
+
+## Inhaltsverzeichnis
+
+1. <a href="https://chatgpt.com/g/g-p-69d0c74140e88191bf21e343852943d6-aurawrite/c/69d5274f-3954-8326-9114-19f805be2fd1#zweck-und-einsatzgebiet" target="_blank" rel="noopener noreferrer">Zweck und Einsatzgebiet</a>
+
+2. <a href="https://chatgpt.com/g/g-p-69d0c74140e88191bf21e343852943d6-aurawrite/c/69d5274f-3954-8326-9114-19f805be2fd1#architektur-und-grundprinzip" target="_blank" rel="noopener noreferrer">Architektur und Grundprinzip</a>
+
+3. <a href="https://chatgpt.com/g/g-p-69d0c74140e88191bf21e343852943d6-aurawrite/c/69d5274f-3954-8326-9114-19f805be2fd1#verankerte-tabellen-und-relevante-felder" target="_blank" rel="noopener noreferrer">Verankerte Tabellen und relevante Felder</a>
+
+4. <a href="https://chatgpt.com/g/g-p-69d0c74140e88191bf21e343852943d6-aurawrite/c/69d5274f-3954-8326-9114-19f805be2fd1#%C3%BCbersicht-der-funktionen" target="_blank" rel="noopener noreferrer">Übersicht der Funktionen</a>
+
+5. <a href="https://chatgpt.com/g/g-p-69d0c74140e88191bf21e343852943d6-aurawrite/c/69d5274f-3954-8326-9114-19f805be2fd1#detaillierte-beschreibung-jeder-funktion" target="_blank" rel="noopener noreferrer">Detaillierte Beschreibung jeder Funktion</a>
+
+6. <a href="https://chatgpt.com/g/g-p-69d0c74140e88191bf21e343852943d6-aurawrite/c/69d5274f-3954-8326-9114-19f805be2fd1#rechenlogik-der-zustandsfortschreibung" target="_blank" rel="noopener noreferrer">Rechenlogik der Zustandsfortschreibung</a>
+
+7. <a href="https://chatgpt.com/g/g-p-69d0c74140e88191bf21e343852943d6-aurawrite/c/69d5274f-3954-8326-9114-19f805be2fd1#nexus--und-inflow-regeln" target="_blank" rel="noopener noreferrer">Nexus- und Inflow-Regeln</a>
+
+8. <a href="https://chatgpt.com/g/g-p-69d0c74140e88191bf21e343852943d6-aurawrite/c/69d5274f-3954-8326-9114-19f805be2fd1#romanvorg%C3%A4nger-logik" target="_blank" rel="noopener noreferrer">Romanvorgänger-Logik</a>
+
+9. <a href="https://chatgpt.com/g/g-p-69d0c74140e88191bf21e343852943d6-aurawrite/c/69d5274f-3954-8326-9114-19f805be2fd1#parameterreferenz" target="_blank" rel="noopener noreferrer">Parameterreferenz</a>
+
+10. <a href="https://chatgpt.com/g/g-p-69d0c74140e88191bf21e343852943d6-aurawrite/c/69d5274f-3954-8326-9114-19f805be2fd1#typische-aufrufe" target="_blank" rel="noopener noreferrer">Typische Aufrufe</a>
+
+11. <a href="https://chatgpt.com/g/g-p-69d0c74140e88191bf21e343852943d6-aurawrite/c/69d5274f-3954-8326-9114-19f805be2fd1#debugging-und-fehlersuche" target="_blank" rel="noopener noreferrer">Debugging und Fehlersuche</a>
+
+12. <a href="https://chatgpt.com/g/g-p-69d0c74140e88191bf21e343852943d6-aurawrite/c/69d5274f-3954-8326-9114-19f805be2fd1#worauf-fachlich-und-technisch-zu-achten-ist" target="_blank" rel="noopener noreferrer">Worauf fachlich und technisch zu achten ist</a>
+
+---
+
+# Zweck und Einsatzgebiet
+
+Die Story-State-Funktionsfamilie dient dazu, **den gültigen Zustand aller Story-Variablen zu einem konkreten Beat** zu berechnen.
+
+Sie ist für ein System gedacht, in dem:
+
+- eine **Serie** mehrere **Romane** enthält,
+
+- ein **Roman** mehrere **Kapitel** enthält,
+
+- ein **Kapitel** mehrere **Szenen** enthält,
+
+- eine **Szene** mehrere **Beats** enthält,
+
+- **Story-Variablen** im Verlauf der Handlung geändert werden,
+
+- Kapitel über **Hauptvorgänger**, **Inflows** und **Nexus-Modi** miteinander verbunden sind,
+
+- Romane ebenfalls über **Vorgängerromane** aufeinander aufbauen können.
+
+Die Funktionsfamilie ermöglicht insbesondere:
+
+- konsistente Kontextbildung für KI-Prompts,
+
+- reproduzierbare Zustandsberechnung,
+
+- Debugging von Storylogik,
+
+- kontrollierte Plot-Fortschreibung über Kapitel- und Romangrenzen hinweg.
+
+---
+
+# Architektur und Grundprinzip
+
+## Ziel
+
+Zu einem Zielbeat soll bestimmt werden:
+
+- welcher Wert jede Story-Variable zu diesem Zeitpunkt hat,
+
+- aus welchem Change dieser Wert stammt,
+
+- aus welchem Beat dieser Change kommt,
+
+- ob der Zustand aus einem Vorgängerkapitel, Inflow oder Vorgängerroman übernommen wurde.
+
+## Grundidee
+
+Die Zustandsberechnung läuft in Schichten:
+
+1. **Initialwerte** der Serie laden
+
+2. **Vorgängerroman** berücksichtigen
+
+3. **Vorgängerkapitel** berücksichtigen
+
+4. **Inflows / Nexus** eines Kapitels berücksichtigen
+
+5. **Kapitelinterne Changes** bis zum Zielbeat anwenden
+
+So entsteht ein deterministischer Zustand für genau diesen Punkt der Geschichte.
+
+---
+
+# Verankerte Tabellen und relevante Felder
+
+## `public.series`
+
+Relevante Felder:
+
+- `id`
+
+- `title`
+
+## `public.novels`
+
+Relevante Felder:
+
+- `id`
+
+- `series_id`
+
+- `sort_order`
+
+- `predecessor_novel_id`
+
+- `is_standalone`
+
+## `public.chapters`
+
+Relevante Felder:
+
+- `id`
+
+- `novel_id`
+
+- `sort_order`
+
+- `predecessor_chapter_id`
+
+- `is_standalone`
+
+- `nexus_mode`
+
+## `public.chapter_inflows`
+
+Relevante Felder:
+
+- `chapter_id`
+
+- `inflow_chapter_id`
+
+- `sort_order`
+
+- `is_required`
+
+## `public.scenes`
+
+Relevante Felder:
+
+- `id`
+
+- `chapter_id`
+
+- `sort_order`
+
+- `starts_at`
+
+## `public.beats`
+
+Relevante Felder:
+
+- `id`
+
+- `scene_id`
+
+- `sort_order`
+
+- optional in der Anwendung zusätzlich `beat_text`, `draft_text`
+
+## `public.story_variables`
+
+Relevante Felder:
+
+- `id`
+
+- `series_id`
+
+- `key`
+
+- `label`
+
+- `type`
+
+- `initial_value`
+
+- `sort_order`
+
+## `public.story_variable_changes`
+
+Relevante Felder:
+
+- `id`
+
+- `variable_id`
+
+- `beat_id`
+
+- `value_json`
+
+Optional können zusätzlich vorhanden sein:
+
+- `novel_id`
+
+- `chapter_id`
+
+- `scene_id`
+
+- `beat_index`
+
+- `note`
+
+Für die Laufzeitlogik ist `beat_id`**&#x20;die führende Verankerung**.
+
+---
+
+# Übersicht der Funktionen
+
+## Kernfunktionen
+
+1. `compare_story_state_entries(...)`
+
+2. `compare_story_state_entries_by_scene_time(...)`
+
+3. `get_story_target_at_beat(...)`
+
+4. `get_main_predecessor_chapter(...)`
+
+5. `get_main_predecessor_novel(...)`
+
+6. `get_last_chapter_of_novel(...)`
+
+7. `get_chapter_inflows_json(...)`
+
+8. `get_initial_story_state_json(...)`
+
+9. `merge_story_states_for_chapter(...)`
+
+10. `apply_chapter_changes_to_state(...)`
+
+11. `get_state_after_novel_json(...)`
+
+12. `get_state_before_chapter_json(...)`
+
+13. `get_story_state_at_beat(...)`
+
+## Debugfunktionen
+
+1. `debug_state_before_chapter(...)`
+
+2. `debug_state_after_novel(...)`
+
+---
+
+# Detaillierte Beschreibung jeder Funktion
+
+## 1. `compare_story_state_entries(p_left jsonb, p_right jsonb)`
+
+### Zweck
+
+Vergleicht zwei State-Einträge vollständig und deterministisch.
+
+### Verwendet für
+
+- vollständige Ordnungsvergleiche,
+
+- Tie-Breaker,
+
+- inflow-vs-inflow-Entscheidungen,
+
+- Vergleich von Zuständen mit gleicher Szenenzeit.
+
+### Vergleichsreihenfolge
+
+1. `scene_starts_at`
+
+2. `novel_sort`
+
+3. `chapter_sort`
+
+4. `scene_sort`
+
+5. `beat_sort`
+
+6. `change_id`
+
+### Rückgabe
+
+- `-1` → linker Eintrag ist älter/kleiner
+
+- `0` → gleich
+
+- `1` → linker Eintrag ist neuer/größer
+
+---
+
+## 2. `compare_story_state_entries_by_scene_time(p_left jsonb, p_right jsonb)`
+
+### Zweck
+
+Vergleicht zwei State-Einträge **nur anhand von&#x20;**`scene_starts_at`.
+
+### Verwendet für
+
+- Nexus-Logik zwischen Strängen
+
+### Fachliche Bedeutung
+
+Zwischen Hauptstrang und inflow soll oft nur die **Szenenzeit** zählen, nicht der einzelne Beat innerhalb der Szene.
+
+### Rückgabe
+
+- `-1`
+
+- `0`
+
+- `1`
+
+wie oben.
+
+---
+
+## 3. `get_story_target_at_beat(p_beat_id uuid)`
+
+### Zweck
+
+Lädt den vollständigen Zielkontext eines Beats.
+
+### Rückgabe
+
+- `series_id`
+
+- `novel_id`
+
+- `novel_sort`
+
+- `chapter_id`
+
+- `chapter_sort`
+
+- `target_nexus_mode`
+
+- `scene_id`
+
+- `scene_sort`
+
+- `scene_starts_at`
+
+- `beat_id`
+
+- `beat_sort`
+
+### Verwendung
+
+Diese Funktion ist der Einstieg in die Zustandsberechnung.
+
+---
+
+## 4. `get_main_predecessor_chapter(p_chapter_id uuid)`
+
+### Zweck
+
+Ermittelt den Hauptvorgänger eines Kapitels.
+
+### Logik
+
+1. `is_standalone = true` → kein Vorgänger
+
+2. `predecessor_chapter_id` vorhanden → dieser zählt
+
+3. sonst Fallback auf Kapitel mit nächstniedrigerer `sort_order` im selben Roman
+
+### Bedeutung
+
+Definiert den linearen Hauptstrang zwischen Kapiteln.
+
+---
+
+## 5. `get_main_predecessor_novel(p_novel_id uuid)`
+
+### Zweck
+
+Ermittelt den Hauptvorgänger eines Romans.
+
+### Logik
+
+1. `is_standalone = true` → kein Vorgänger
+
+2. `predecessor_novel_id` vorhanden → dieser zählt
+
+3. sonst Fallback auf Roman mit nächstniedrigerer `sort_order` in derselben Serie
+
+### Bedeutung
+
+Definiert den linearen Hauptstrang zwischen Romanen.
+
+---
+
+## 6. `get_last_chapter_of_novel(p_novel_id uuid)`
+
+### Zweck
+
+Liefert das letzte Kapitel eines Romans.
+
+### Logik
+
+Kapitel mit höchster `sort_order` im Roman.
+
+### Bedeutung
+
+Wird benötigt, um den Zustand **nach einem Roman** zu bestimmen.
+
+---
+
+## 7. `get_chapter_inflows_json(p_chapter_id uuid)`
+
+### Zweck
+
+Lädt alle inflows eines Kapitels als JSON-Array.
+
+### Beispielstruktur
+
+```typescript
+[
+  {
+    "inflow_chapter_id": "uuid",
+    "sort_order": 1,
+    "is_required": true
+  }
+]
+
+```
+
+### Bedeutung
+
+Liefert die Eingangsstränge für die Kapitel-Nexus-Logik.
+
+---
+
+## 8. `get_initial_story_state_json(p_series_id uuid)`
+
+### Zweck
+
+Erzeugt den Initialzustand aller Story-Variablen einer Serie.
+
+### Rückgabe
+
+JSON-Objekt mit `variable_id` als Schlüssel und State-Eintrag als Wert.
+
+### State-Eintrag enthält
+
+- `variable_id`
+
+- `value_json`
+
+- `source_type = initial_value`
+
+- `source_change_id = null`
+
+- `source_beat_id = null`
+
+- Sortiermetadaten
+
+### Bedeutung
+
+Startpunkt der ganzen Zustandslogik.
+
+---
+
+## 9. `merge_story_states_for_chapter(...)`
+
+### Parameter
+
+- `p_chapter_id uuid`
+
+- `p_main_state jsonb`
+
+- `p_inflow_states_json jsonb`
+
+### Zweck
+
+Führt Hauptstrang und inflows zu einem Kapitelzustand zusammen.
+
+### Logik
+
+#### Wenn keine inflows vorhanden sind
+
+`p_main_state` wird unverändert zurückgegeben.
+
+#### Wenn `nexus_mode = 'mainline_wins'`
+
+- Hauptstrang gewinnt, wenn dort ein echter Change vorliegt
+
+- sonst kann ein inflow übernehmen
+
+#### Wenn `nexus_mode = 'chronological_last_wins'`
+
+- spätere `scene_starts_at` gewinnt
+
+- bei gleicher `scene_starts_at` gewinnt der Hauptstrang
+
+- inflow-vs-inflow bei gleicher Zeit wird weiter verglichen
+
+### Fachliche Bedeutung
+
+Das ist die zentrale Funktion für Nexus-Entscheidungen.
+
+---
+
+## 10. `apply_chapter_changes_to_state(...)`
+
+### Parameter
+
+- `p_chapter_id uuid`
+
+- `p_base_state jsonb`
+
+- `p_stop_beat_id uuid default null`
+
+- `p_mode text default 'gross'`
+
+### Zweck
+
+Wendet die Änderungen eines Kapitels auf einen vorhandenen Zustand an.
+
+### Wie sie arbeitet
+
+#### Ohne `p_stop_beat_id`
+
+Das komplette Kapitel wird verarbeitet.
+
+#### Mit `p_stop_beat_id`
+
+Es wird nur bis zum Stop-Beat ausgewertet.
+
+### Modus
+
+#### `net`
+
+Stop-Beat wird **nicht** mitgerechnet.
+
+#### `gross`
+
+Stop-Beat wird **mitgerechnet**.
+
+### Technische Verankerung
+
+Änderungen werden über
+
+```typescript
+story_variable_changes.beat_id = beats.id
+
+```
+
+verbunden.
+
+### Bedeutung
+
+Diese Funktion ist die lineare Fortschreibungslogik innerhalb eines Kapitels.
+
+---
+
+## 11. `get_state_after_novel_json(...)`
+
+### Parameter
+
+- `p_novel_id uuid`
+
+- `p_path_novels uuid[]`
+
+- `p_path_chapters uuid[]`
+
+### Zweck
+
+Bestimmt den Zustand nach dem letzten Kapitel eines Romans.
+
+### Logik
+
+1. letztes Kapitel des Romans bestimmen
+
+2. Zustand vor diesem Kapitel laden
+
+3. letztes Kapitel vollständig anwenden
+
+4. Ergebnis zurückgeben
+
+### Bedeutung
+
+Wird genutzt, wenn ein späterer Roman auf einem Vorgängerroman aufbauen soll.
+
+---
+
+## 12. `get_state_before_chapter_json(...)`
+
+### Parameter
+
+- `p_chapter_id uuid`
+
+- `p_path_chapters uuid[]`
+
+- `p_path_novels uuid[]`
+
+### Zweck
+
+Bestimmt den Zustand vor Beginn eines Kapitels.
+
+### Das ist die zentrale Rekursionsfunktion.
+
+### Logik im Detail
+
+#### A. Kapitel hat Hauptvorgänger
+
+Dann:
+
+1. Zustand vor Vorgängerkapitel bestimmen
+
+2. Vorgängerkapitel vollständig anwenden
+
+3. Ergebnis ist der Hauptzustand
+
+#### B. Kapitel hat keinen Hauptvorgänger
+
+Dann wird geprüft, ob der Roman einen Vorgängerroman hat.
+
+##### Wenn ja
+
+- Zustand nach dem letzten Kapitel des Vorgängerromans verwenden
+
+##### Wenn nein
+
+- Initialzustand verwenden
+
+#### Danach
+
+- inflows des Kapitels laden
+
+- inflow-Zustände rekursiv berechnen
+
+- Hauptzustand und inflows zusammenführen
+
+### Zyklenschutz
+
+- `p_path_chapters` verhindert Kapitelzyklen
+
+- `p_path_novels` verhindert Romanzyklen
+
+---
+
+## 13. `get_story_state_at_beat(...)`
+
+### Parameter
+
+- `p_beat_id uuid`
+
+- `p_mode text default 'net'`
+
+### Zweck
+
+Liefert den vollständigen Storyzustand an einem konkreten Beat.
+
+### Rückgabe
+
+Tabellenförmig:
+
+- `variable_id`
+
+- `variable_key`
+
+- `variable_label`
+
+- `value_json`
+
+- `source_type`
+
+- `source_change_id`
+
+- `source_beat_id`
+
+### Ablauf
+
+1. Zielkontext laden
+
+2. Zustand vor dem Zielkapitel berechnen
+
+3. Kapitel bis zum Zielbeat anwenden
+
+4. Ergebnis tabellarisch zurückgeben
+
+### Das ist der wichtigste Anwendungseinstieg.
+
+---
+
+## 14. `debug_state_before_chapter(...)`
+
+### Zweck
+
+Zeigt den Zustand vor einem Kapitel tabellarisch an.
+
+### Verwendung
+
+Zum Prüfen von:
+
+- Kapitelvorgängern
+
+- inflows
+
+- Nexus-Regeln
+
+- Zustandsweitergabe
+
+---
+
+## 15. `debug_state_after_novel(...)`
+
+### Zweck
+
+Zeigt den Zustand nach einem Roman tabellarisch an.
+
+### Verwendung
+
+Zum Prüfen von:
+
+- Romanverkettung
+
+- Zustandstransfer zwischen Romanen
+
+---
+
+# Rechenlogik der Zustandsfortschreibung
+
+## Ausgangspunkt
+
+Jede Story-Variable besitzt einen Initialwert.
+
+## Fortschreibung
+
+Der Zustand wird rekursiv aufgebaut:
+
+### Auf Romanebene
+
+- Vorgängerroman wird ausgewertet
+
+- dessen Endzustand wird übernommen
+
+### Auf Kapitelebene
+
+- Vorgängerkapitel wird ausgewertet
+
+- dessen Endzustand wird übernommen
+
+### Auf Nexus-Ebene
+
+- Hauptzustand und inflows werden zusammengeführt
+
+### Innerhalb des Zielkapitels
+
+- alle relevanten Changes bis zum Zielbeat werden angewendet
+
+---
+
+# Nexus- und Inflow-Regeln
+
+## `mainline_wins`
+
+Wenn Hauptstrang und inflow kollidieren:
+
+- Hauptstrang gewinnt
+
+## `chronological_last_wins`
+
+Wenn Hauptstrang und inflow kollidieren:
+
+- spätere Szenenzeit gewinnt
+
+## Gleichstand
+
+Wenn beide dieselbe `scene_starts_at` haben:
+
+- Hauptstrang gewinnt
+
+## Wichtiger Punkt
+
+Zwischen Strängen zählt hier bewusst **nur die Szenenzeit**, nicht der einzelne Beat innerhalb der Szene.
+
+---
+
+# Romanvorgänger-Logik
+
+## Ziel
+
+Roman 2 und Roman 3 sollen nicht immer mit Initialwerten starten, sondern auf dem Zustand früherer Romane aufbauen können.
+
+## Mechanik
+
+Ein Roman kann über `predecessor_novel_id` an einen Vorgängerroman gekoppelt sein.
+
+Falls kein expliziter Vorgänger gesetzt ist, kann optional der Roman mit nächstniedrigerer `sort_order` verwendet werden.
+
+## Sonderfall
+
+Wenn `is_standalone = true`, beginnt dieser Roman einen eigenen Strang.
+
+---
+
+# Parameterreferenz
+
+## `p_beat_id`
+
+UUID des Zielbeats.
+
+## `p_chapter_id`
+
+UUID des Zielkapitels.
+
+## `p_novel_id`
+
+UUID des Zielromans.
+
+## `p_mode`
+
+Erlaubte Werte:
+
+- `net`
+
+- `gross`
+
+### Bedeutung
+
+- `net` → Zustand vor dem Zielbeat
+
+- `gross` → Zustand inklusive Zielbeat
+
+## `p_path_chapters`
+
+Interner Rekursionspfad zur Zykluserkennung bei Kapiteln.
+
+## `p_path_novels`
+
+Interner Rekursionspfad zur Zykluserkennung bei Romanen.
+
+---
+
+# Typische Aufrufe
+
+## Zustand an einem Beat
+
+```typescript
+select *
+from public.get_story_state_at_beat('BEAT_UUID', 'net');
+
+```
+
+## Zustand vor einem Kapitel
+
+```typescript
+select *
+from public.debug_state_before_chapter('CHAPTER_UUID');
+
+```
+
+## Zustand nach einem Roman
+
+```typescript
+select *
+from public.debug_state_after_novel('NOVEL_UUID');
+
+```
+
+## Letztes Kapitel eines Romans ermitteln
+
+```typescript
+select public.get_last_chapter_of_novel('NOVEL_UUID');
+
+```
+
+---
+
+# Debugging und Fehlersuche
+
+## Prüfen, ob Vorgängerroman korrekt zieht
+
+1. Zustand nach Roman 1 anzeigen
+
+2. Zustand vor Kapitel 1 von Roman 2 anzeigen
+
+3. beide vergleichen
+
+## Prüfen, ob Kapitelvorgänger korrekt zieht
+
+1. `debug_state_before_chapter(...)` für Kapitel 2 ausführen
+
+2. prüfen, ob Werte aus Kapitel 1 vorhanden sind
+
+## Prüfen, ob Nexus korrekt arbeitet
+
+1. Zeiten der relevanten inflow- und mainline-Szenen prüfen
+
+2. `nexus_mode` des Zielkapitels prüfen
+
+3. Zielbeat mit `get_story_state_at_beat(...)` auslesen
+
+## Prüfen, ob Changes überhaupt greifen
+
+```typescript
+select *
+from public.story_variable_changes
+where beat_id = 'BEAT_UUID';
+
+```
+
+---
+
+# Worauf fachlich und technisch zu achten ist
+
+## 1. `scene.starts_at` ist für `chronological_last_wins` entscheidend
+
+Wenn Szenenzeiten nicht sauber gesetzt sind, kann die Nexus-Logik nicht korrekt entscheiden.
+
+## 2. `story_variable_changes.value_json` muss zum Erwartungsformat der Anwendung passen
+
+Wenn die Anwendung etwa
+
+```typescript
+{"value":"4"}
+
+```
+
+erwartet, muss die DB denselben Aufbau speichern.
+
+## 3. `beat_id` ist das führende Modell
+
+Felder wie `beat_index`, `scene_id`, `chapter_id` in `story_variable_changes` können zusätzlich existieren, sind aber für die Kernlogik nachrangig.
+
+## 4. `is_required` bei inflows wird aktuell noch nicht fachlich erzwungen
+
+Das Feld ist vorhanden, aber noch nicht aktiv Teil der Merge-Entscheidung.
+
+## 5. Zirkuläre Vorgängerbeziehungen vermeiden
+
+- Kapitel dürfen sich nicht im Kreis referenzieren
+
+- Romane dürfen sich nicht im Kreis referenzieren
+
+Die Funktionen brechen dann mit einer Exception ab.
+
+## 6. Ohne inflows wird nichts gemerged
+
+Der Hauptzustand wird dann unverändert weitergegeben. Das war wichtig, um den linearen Hauptstrang stabil zu halten.
+
+---
+
+# Kurzfazit
+
+Diese Funktionsfamilie bildet eine vollständige, rekursive Zustandslogik für Story-Variablen in Supabase ab.
+
+Sie unterstützt:
+
+- lineare Kapitelverkettung
+
+- Kapitel-Inflows und Nexus
+
+- Beat-genaue Story-Changes
+
+- Romanvorgänger
+
+- Debugging von Zuständen vor Kapiteln und nach Romanen
+
+Der wichtigste operative Einstieg ist:
+
+```typescript
+public.get_story_state_at_beat(...)
+
+```
+
+Die wichtigsten fachlichen Kernfunktionen sind:
+
+- `get_state_before_chapter_json(...)`
+
+- `apply_chapter_changes_to_state(...)`
+
+- `merge_story_states_for_chapter(...)`
+
+- `get_state_after_novel_json(...)`
+
+Wenn du willst, formatiere ich dir das noch als **Whitepaper-artige Projektdoku mit Einleitung, Architekturdiagramm in Textform und Abschnitt „bekannte Grenzen / nächste Ausbaustufen“**.

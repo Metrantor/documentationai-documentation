@@ -73,6 +73,14 @@
                     "group": "Story States",
                     "pages": [
                       {
+                        "title": "Technische Dokumentation der Story-State-Funktionsfamilie",
+                        "path": "technische-dokumentation-der-story-state-funktionsfamilie"
+                      },
+                      {
+                        "title": "Dokumentation der Story State-Funktionen",
+                        "path": "dokumentation-der-story-state-funktionen"
+                      },
+                      {
                         "title": "Story State Funktionen (Supabase)",
                         "path": "story-state-funktionen-supabase"
                       }
