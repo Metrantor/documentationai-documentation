@@ -1,0 +1,169 @@
+---
+title: Integrations and Extensions
+description: Connect AuraWrite with your favorite tools and services to supercharge your workflow and productivity.
+---
+
+## Overview
+
+AuraWrite supports seamless integrations with popular third-party tools, webhooks for automation, and a robust API for custom solutions. You can sync documents, automate workflows, and extend functionality without leaving your environment. Start with pre-built connections or build your own using webhooks and API endpoints.
+
+<Callout kind="info">
+  All integrations require an active AuraWrite account. Generate your API key from the dashboard at `https://dashboard.example.com/settings/api`.
+</Callout>
+
+## Popular Integrations
+
+Discover ready-to-use connections that enhance your productivity.
+
+<Columns cols={3}>
+  <Card title="Slack" icon="message-circle" href="https://slack.com">
+    Receive real-time notifications for document updates and share AuraWrite links directly in channels.
+  </Card>
+  <Card title="Zapier" icon="zap" href="https://zapier.com">
+    Build no-code automations connecting AuraWrite to 5000+ apps.
+  </Card>
+  <Card title="Google Workspace" icon="file-text" href="https://workspace.google.com">
+    Sync documents with Google Drive and collaborate in real-time.
+  </Card>
+  <Card title="GitHub" icon="github" href="https://github.com">
+    Version control your documents and trigger builds on changes.
+  </Card>
+  <Card title="Notion" icon="book-open" href="https://notion.so">
+    Import and export pages between AuraWrite and Notion databases.
+  </Card>
+  <Card title="Airtable" icon="database" href="https://airtable.com">
+    Map AuraWrite data to Airtable bases for advanced querying.
+  </Card>
+</Columns>
+
+## Webhook Setup
+
+Set up webhooks to receive events like document creation or updates. This enables automation with your preferred services.
+
+<Steps>
+  <Step title="Create Webhook" icon="plus">
+    Navigate to `https://dashboard.example.com/settings/webhooks` and click "New Webhook".
+  </Step>
+  <Step title="Configure Events" icon="settings">
+    Select events such as `document.created` or `document.updated`.
+  </Step>
+  <Step title="Add Endpoint" icon="link">
+    Enter your webhook URL, e.g., `https://your-webhook-url.com/aurawebhook`.
+  </Step>
+  <Step title="Verify Setup" icon="check-circle">
+    Test the webhook. AuraWrite sends a `POST` request with event data.
+  </Step>
+</Steps>
+
+Here is a sample webhook payload:
+
+```json
+{
+  "event": "document.updated",
+  "document": {
+    "id": "doc_123abc",
+    "title": "Project Roadmap",
+    "updated_at": "2024-10-15T10:30:00Z"
+  }
+}
+```
+
+## API Access for Custom Integrations
+
+Build custom solutions using AuraWrite's REST API at `https://api.example.com/v1`.
+
+<CodeGroup tabs="JavaScript,Python,cURL">
+  ```javascript
+  const response = await fetch('https://api.example.com/v1/documents', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${YOUR_API_KEY}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      title: 'New Document',
+      content: 'Hello from integration!'
+    })
+  });
+  const data = await response.json();
+  console.log(data);
+  ```
+  ```python
+  import requests
+
+  headers = {
+      'Authorization': f'Bearer {YOUR_API_KEY}',
+      'Content-Type': 'application/json'
+  }
+  data = {
+      'title': 'New Document',
+      'content': 'Hello from integration!'
+  }
+  response = requests.post('https://api.example.com/v1/documents', json=data, headers=headers)
+  print(response.json())
+  ```
+  ```bash
+  curl -X POST https://api.example.com/v1/documents \
+    -H "Authorization: Bearer YOUR_API_KEY" \
+    -H "Content-Type: application/json" \
+    -d '{
+      "title": "New Document",
+      "content": "Hello from integration!"
+    }'
+  ```
+</CodeGroup>
+
+<ParamField path="title" param-type="string" required="true">
+  Document title.
+</ParamField>
+
+<ParamField header="Authorization" param-type="string" required="true">
+  Bearer token: `Bearer YOUR_API_KEY`.
+</ParamField>
+
+## Cloud Storage Sync
+
+Sync your AuraWrite documents with cloud providers using built-in connectors.
+
+<Tabs>
+  <Tab title="Google Drive" icon="cloud">
+    Connect your Google account via OAuth.
+
+    <Steps>
+      <Step title="Authorize">
+        Go to `https://dashboard.example.com/integrations/drive` and sign in.
+      </Step>
+      <Step title="Select Folder">
+        Choose a Drive folder for two-way sync.
+      </Step>
+    </Steps>
+  </Tab>
+  <Tab title="Dropbox" icon="package">
+    Use API token for secure access.
+
+    ```bash
+    # Generate token at dropbox.com/developers
+    export DROPBOX_TOKEN=your-dropbox-token
+    ```
+  </Tab>
+  <Tab title="OneDrive" icon="microsoft">
+    Microsoft account integration for enterprise users.
+  </Tab>
+</Tabs>
+
+## Compatibility Matrix
+
+| Tool/Service     | Status     | Notes                          |
+|------------------|------------|--------------------------------|
+| Slack            | ✅ Full    | Notifications and sharing      |
+| Zapier           | ✅ Full    | 100+ triggers and actions      |
+| Google Drive     | ✅ Full    | Real-time sync                 |
+| GitHub           | ✅ Beta    | Webhook-only for now           |
+| Notion           | ✅ Full    | Import/export pages            |
+| Airtable         | ⚠️ Partial | Read-only sync                 |
+
+<Callout kind="tip">
+  Check the dashboard for the latest integration status and setup guides.
+</Callout>
+
+Explore more in the [Quickstart](/quickstart) or [API Reference](/api-reference).

@@ -1,0 +1,125 @@
+---
+title: Core Features
+description: Explore the essential features of AuraWrite that make writing and documentation efficient and collaborative.
+---
+
+## Overview
+
+AuraWrite provides powerful tools for modern documentation workflows. You can create, edit, and collaborate on documents with real-time updates, rich formatting, and seamless sharing. These core features streamline your writing process from draft to publish.
+
+<Columns cols={2}>
+  <Card title="Real-time Editing" icon="edit-3" href="#real-time-editing">
+    Edit documents instantly with live previews and syntax highlighting.
+  </Card>
+  <Card title="Collaboration" icon="users" href="#collaboration">
+    Invite team members and share links for real-time co-editing.
+  </Card>
+  <Card title="Templates" icon="file-text" href="#templates">
+    Start quickly with pre-built templates and custom formatting.
+  </Card>
+  <Card title="Version History" icon="git-branch" href="#version-history">
+    Track changes and revert to previous versions effortlessly.
+  </Card>
+</Columns>
+
+## Real-time Editing
+
+Experience seamless editing with AuraWrite's real-time capabilities. Changes appear instantly for all users, eliminating version conflicts. The built-in preview shows your document as it will appear when published.
+
+<Steps>
+  <Step title="Create Document" icon="plus">
+    Click "New Document" to start writing.
+  </Step>
+  <Step title="Enable Live Preview" icon="eye">
+    Toggle the preview pane to see formatted output.
+  </Step>
+  <Step title="Make Changes" icon="edit">
+    Type and watch updates reflect in real time.
+  </Step>
+</Steps>
+
+<Callout kind="tip">
+  Use keyboard shortcuts like <kbd>Ctrl</kbd>+<kbd>S</kbd> for instant saves during editing.
+</Callout>
+
+## Collaboration and Sharing
+
+Invite others to collaborate without accounts. Generate shareable links with view, edit, or comment permissions.
+
+<Tabs>
+  <Tab title="Share Link" icon="link">
+    Right-click your document and select "Share". Copy the generated URL.
+  </Tab>
+  <Tab title="Invite Users" icon="mail">
+    Enter email addresses to send direct invitations.
+  </Tab>
+  <Tab title="Permissions" icon="shield">
+    Set roles: Viewer, Editor, or Admin for fine-grained control.
+  </Tab>
+</Tabs>
+
+## Templates and Formatting
+
+AuraWrite offers templates for blogs, docs, and APIs. Apply rich formatting with Markdown support.
+
+<CodeGroup tabs="Markdown,HTML">
+  ```markdown
+  # Heading
+
+  - List item
+  - Another item
+
+  `Inline code` and **bold text**.
+  ```
+  ```html
+  <h1>Heading</h1>
+
+  <ul>
+    <li>List item</li>
+    <li>Another item</li>
+  </ul>
+
+  <code>Inline code</code> and <strong>bold text</strong>.
+  ```
+</CodeGroup>
+
+Customize templates via the formatting toolbar for tables, images, and code blocks.
+
+## Version History Management
+
+Never lose work with automatic version history. AuraWrite saves snapshots on every change.
+
+<Expandable title="View and Restore Versions" default-open="true">
+  Navigate to the "History" panel. Select a version to compare diffs or restore it.
+
+  ```mermaid
+  graph TD
+      A[Current Doc] --> B[Snapshot 1]
+      B --> C[Snapshot 2]
+      C --> D[Snapshot 3]
+      A -->|Restore| D
+  ```
+</Expandable>
+
+## Export Formats and Publishing
+
+Publish your documents in multiple formats. Export to PDF, HTML, or Markdown directly.
+
+| Format     | Use Case                  | Steps                  |
+|------------|---------------------------|------------------------|
+| PDF       | Printable reports        | Export > PDF          |
+| HTML      | Web embedding            | Export > HTML         |
+| Markdown  | GitHub repos             | Export > Markdown     |
+
+<Callout kind="success">
+  All exports preserve your formatting and images for professional results.
+</Callout>
+
+<Columns cols={2}>
+  <Card title="Next: Quickstart" icon="book-open" href="/quickstart">
+    Set up AuraWrite in minutes.
+  </Card>
+  <Card title="API Reference" icon="code" href="/api-reference">
+    Integrate programmatically.
+  </Card>
+</Columns>
