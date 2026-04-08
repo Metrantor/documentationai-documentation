@@ -73,6 +73,10 @@
                     "group": "Story States",
                     "pages": [
                       {
+                        "title": "Story State Whitepaper",
+                        "path": "story-state-whitepaper"
+                      },
+                      {
                         "title": "Technische Dokumentation der Story-State-Funktionsfamilie",
                         "path": "technische-dokumentation-der-story-state-funktionsfamilie"
                       },

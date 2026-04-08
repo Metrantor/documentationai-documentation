@@ -1,0 +1,685 @@
+---
+title: 'Rekursive Story-State-Architektur '
+---
+# Projektdokumentation
+
+## Rekursive Story-State-Architektur für Supabase
+
+---
+
+## Inhaltsverzeichnis
+
+1. <a href="https://chatgpt.com/g/g-p-69d0c74140e88191bf21e343852943d6-aurawrite/c/69d5274f-3954-8326-9114-19f805be2fd1#einleitung" target="_blank" rel="noopener noreferrer">Einleitung</a>
+
+2. <a href="https://chatgpt.com/g/g-p-69d0c74140e88191bf21e343852943d6-aurawrite/c/69d5274f-3954-8326-9114-19f805be2fd1#zielbild-der-architektur" target="_blank" rel="noopener noreferrer">Zielbild der Architektur</a>
+
+3. <a href="https://chatgpt.com/g/g-p-69d0c74140e88191bf21e343852943d6-aurawrite/c/69d5274f-3954-8326-9114-19f805be2fd1#fachlicher-nutzen" target="_blank" rel="noopener noreferrer">Fachlicher Nutzen</a>
+
+4. <a href="https://chatgpt.com/g/g-p-69d0c74140e88191bf21e343852943d6-aurawrite/c/69d5274f-3954-8326-9114-19f805be2fd1#strukturelles-gesamtmodell" target="_blank" rel="noopener noreferrer">Strukturelles Gesamtmodell</a>
+
+5. <a href="https://chatgpt.com/g/g-p-69d0c74140e88191bf21e343852943d6-aurawrite/c/69d5274f-3954-8326-9114-19f805be2fd1#architekturdiagramm-in-textform" target="_blank" rel="noopener noreferrer">Architekturdiagramm in Textform</a>
+
+6. <a href="https://chatgpt.com/g/g-p-69d0c74140e88191bf21e343852943d6-aurawrite/c/69d5274f-3954-8326-9114-19f805be2fd1#zentrale-datenobjekte" target="_blank" rel="noopener noreferrer">Zentrale Datenobjekte</a>
+
+7. <a href="https://chatgpt.com/g/g-p-69d0c74140e88191bf21e343852943d6-aurawrite/c/69d5274f-3954-8326-9114-19f805be2fd1#funktionslogik-im-gesamtzusammenhang" target="_blank" rel="noopener noreferrer">Funktionslogik im Gesamtzusammenhang</a>
+
+8. <a href="https://chatgpt.com/g/g-p-69d0c74140e88191bf21e343852943d6-aurawrite/c/69d5274f-3954-8326-9114-19f805be2fd1#ablauf-einer-zustandsberechnung" target="_blank" rel="noopener noreferrer">Ablauf einer Zustandsberechnung</a>
+
+9. <a href="https://chatgpt.com/g/g-p-69d0c74140e88191bf21e343852943d6-aurawrite/c/69d5274f-3954-8326-9114-19f805be2fd1#kapitel-nexus-und-inflows" target="_blank" rel="noopener noreferrer">Kapitel-Nexus und Inflows</a>
+
+10. <a href="https://chatgpt.com/g/g-p-69d0c74140e88191bf21e343852943d6-aurawrite/c/69d5274f-3954-8326-9114-19f805be2fd1#romanvorg%C3%A4nger-und-serienfortschreibung" target="_blank" rel="noopener noreferrer">Romanvorgänger und Serienfortschreibung</a>
+
+11. <a href="https://chatgpt.com/g/g-p-69d0c74140e88191bf21e343852943d6-aurawrite/c/69d5274f-3954-8326-9114-19f805be2fd1#verwendung-im-anwendungskontext" target="_blank" rel="noopener noreferrer">Verwendung im Anwendungskontext</a>
+
+12. <a href="https://chatgpt.com/g/g-p-69d0c74140e88191bf21e343852943d6-aurawrite/c/69d5274f-3954-8326-9114-19f805be2fd1#debugging-strategie" target="_blank" rel="noopener noreferrer">Debugging-Strategie</a>
+
+13. <a href="https://chatgpt.com/g/g-p-69d0c74140e88191bf21e343852943d6-aurawrite/c/69d5274f-3954-8326-9114-19f805be2fd1#bekannte-grenzen" target="_blank" rel="noopener noreferrer">Bekannte Grenzen</a>
+
+14. <a href="https://chatgpt.com/g/g-p-69d0c74140e88191bf21e343852943d6-aurawrite/c/69d5274f-3954-8326-9114-19f805be2fd1#n%C3%A4chste-sinnvolle-ausbaustufen" target="_blank" rel="noopener noreferrer">Nächste sinnvolle Ausbaustufen</a>
+
+15. <a href="https://chatgpt.com/g/g-p-69d0c74140e88191bf21e343852943d6-aurawrite/c/69d5274f-3954-8326-9114-19f805be2fd1#kurzfazit" target="_blank" rel="noopener noreferrer">Kurzfazit</a>
+
+---
+
+# Einleitung
+
+Die hier beschriebene Architektur dient dazu, in einer Roman- und Szenenverwaltungsanwendung auf **deterministische Weise** den gültigen Zustand einer Geschichte zu einem beliebigen Beat zu bestimmen.
+
+Im Kern beantwortet das System die Frage:
+
+> **Welche Story-Variablen gelten genau an diesem Punkt der Handlung?**
+
+Diese Frage ist für ein KI-gestütztes Schreibsystem zentral, weil ein Sprachmodell nur dann konsistent schreiben kann, wenn es nicht irgendeinen ungefähren Kontext, sondern einen **sauber berechneten, logisch korrekten Storyzustand** erhält.
+
+Das System ist deshalb ausdrücklich **kein klassisches RAG-System**, das Inhalte über Ähnlichkeiten oder Vektorabfragen errät, sondern ein **regelbasiertes Zustandsmodell**.
+
+---
+
+# Zielbild der Architektur
+
+Die Architektur verfolgt vier Hauptziele:
+
+## 1. Deterministische Zustandsberechnung
+
+Zu jedem Beat soll exakt nachvollziehbar sein:
+
+- welcher Variablenwert gilt,
+
+- woher er stammt,
+
+- wann er gesetzt wurde.
+
+## 2. Fortschreibung über mehrere Ebenen
+
+Die Zustandslogik soll nicht nur innerhalb eines Kapitels funktionieren, sondern über:
+
+- Kapitel,
+
+- alternative Kapitelpfade,
+
+- Nexus-Punkte,
+
+- Romane,
+
+- Vorgängerromane.
+
+## 3. Nutzbarkeit für KI-Prompts
+
+Die berechneten Zustände sollen direkt in Prompt-Kontexte einfließen können, etwa für:
+
+- Inhaltsgrenzen,
+
+- Perspektivlogik,
+
+- Figurenwissen,
+
+- Ereignisfortschritt,
+
+- Tonalitäts- und Stilregeln.
+
+## 4. Debuggierbarkeit
+
+Die Architektur soll so gebaut sein, dass ihre Entscheidungen nachvollziehbar bleiben.\
+Es muss erkennbar sein:
+
+- warum ein Wert gilt,
+
+- aus welchem Beat er kommt,
+
+- warum ein inflow oder Hauptstrang gewonnen hat.
+
+---
+
+# Fachlicher Nutzen
+
+Die Architektur ist nicht nur technisch interessant, sondern fachlich sehr wertvoll.
+
+## Für das Schreiben
+
+Sie ermöglicht, dass KI-generierte Texte:
+
+- keine Ereignisse vorwegnehmen,
+
+- keine bereits überschriebenen Zustände ignorieren,
+
+- alternative Handlungsstränge korrekt berücksichtigen.
+
+## Für die Romanplanung
+
+Sie erlaubt:
+
+- verzweigte Erzählpfade,
+
+- Zusammenführung paralleler Handlungsstränge,
+
+- kontrollierte Zustandsfortschreibung über mehrere Bände.
+
+## Für die Qualitätssicherung
+
+Sie unterstützt:
+
+- Konsistenzprüfungen,
+
+- Debugging,
+
+- reproduzierbare Tests,
+
+- Analyse von Plotverläufen.
+
+---
+
+# Strukturelles Gesamtmodell
+
+Die Storystruktur ist hierarchisch aufgebaut:
+
+- **Serie**
+
+  - enthält mehrere **Romane**
+
+    - enthält mehrere **Kapitel**
+
+      - enthält mehrere **Szenen**
+
+        - enthält mehrere **Beats**
+
+Zusätzlich existieren:
+
+- **Story-Variablen**
+
+- **Story-Variable-Changes**
+
+- **Kapitel-Inflows**
+
+- **Romanvorgänger**
+
+Die Zustandslogik greift also auf zwei Dimensionen zu:
+
+## 1. Hierarchische Struktur
+
+Beat → Szene → Kapitel → Roman → Serie
+
+## 2. Logische Verknüpfungen
+
+- Hauptvorgänger auf Kapitelbasis
+
+- inflows zwischen Kapiteln
+
+- Hauptvorgänger auf Romanbasis
+
+---
+
+# Architekturdiagramm in Textform
+
+```typescript
+SERIE
+│
+├── ROMAN A
+│   ├── Kapitel 1
+│   │   ├── Szene 1
+│   │   │   ├── Beat 1
+│   │   │   └── Beat 2
+│   │   └── ...
+│   ├── Kapitel 2
+│   ├── Kapitel 3
+│   └── Kapitel 4
+│
+├── ROMAN B
+│   ├── predecessor_novel_id → ROMAN A
+│   ├── Kapitel 1
+│   ├── Kapitel 2
+│   └── ...
+│
+└── ROMAN C
+    ├── predecessor_novel_id → ROMAN B
+    ├── Kapitel 1
+    ├── Kapitel 2
+    ├── Kapitel 3 ───────┐
+    ├── Kapitel 4 ───┐   │
+    └── Kapitel 5 ◄──┴───┘
+         nexus_mode = chronological_last_wins
+
+```
+
+Auf Kapitel-Ebene gilt:
+
+- Kapitel können linear aufeinander folgen
+
+- Kapitel können zusätzliche inflows besitzen
+
+- ein Zielkapitel kann mehrere Zustandsquellen zusammenführen
+
+Auf Roman-Ebene gilt:
+
+- Romane können linear oder explizit über Vorgänger gekoppelt sein
+
+- der Zustand eines Vorgängerromans kann in den nächsten Roman übergehen
+
+---
+
+# Zentrale Datenobjekte
+
+## Story-Variablen
+
+Story-Variablen bilden den fachlichen Zustand der Geschichte ab.
+
+Beispiele:
+
+- `route_locked`
+
+- `crew_trust`
+
+- `nexus_trace`
+
+- `market_debt`
+
+Eine Variable besitzt:
+
+- Typ
+
+- Schlüssel
+
+- Label
+
+- Initialwert
+
+- Reihenfolge
+
+## Story-Variable-Changes
+
+Changes verändern Variablen im Handlungsverlauf.
+
+Wesentlich ist:
+
+- jede Änderung hängt an einem **konkreten Beat**
+
+- dadurch ist der Ursprung eines Zustandswertes eindeutig
+
+## Kapitel-Inflows
+
+Inflows beschreiben Kapitel, die in ein anderes Kapitel „einmünden“.
+
+Dadurch können Zustände aus mehreren Handlungssträngen in einem Nexus-Kapitel zusammengeführt werden.
+
+## Romanvorgänger
+
+Ein Roman kann auf einem früheren Roman aufbauen.\
+Dadurch muss Kapitel 1 eines Romans nicht mit Initialwerten starten, sondern kann den Endzustand eines Vorgängerromans erben.
+
+---
+
+# Funktionslogik im Gesamtzusammenhang
+
+Die Funktionsfamilie besteht aus mehreren spezialisierten Bausteinen.
+
+## Vergleichsfunktionen
+
+Sie entscheiden:
+
+- welcher Eintrag zeitlich oder logisch „später“ ist,
+
+- wie Gleichstände behandelt werden.
+
+## Lookup-Funktionen
+
+Sie bestimmen:
+
+- Zielkontext eines Beats,
+
+- Kapitelvorgänger,
+
+- Romanvorgänger,
+
+- inflows,
+
+- letztes Kapitel eines Romans.
+
+## Zustandsfunktionen
+
+Sie erzeugen:
+
+- Initialzustände,
+
+- Kapitelzustände,
+
+- Romanendzustände,
+
+- Endzustände zu einem Beat.
+
+## Debugfunktionen
+
+Sie machen die Rekursion sichtbar und prüfbar.
+
+---
+
+# Ablauf einer Zustandsberechnung
+
+Nehmen wir die Anfrage:
+
+> „Bestimme den Zustand an Beat X“
+
+Dann läuft die Logik vereinfacht so:
+
+## Schritt 1
+
+Zielkontext des Beats laden:
+
+- Serie
+
+- Roman
+
+- Kapitel
+
+- Szene
+
+- Beat
+
+- Nexus-Modus des Zielkapitels
+
+## Schritt 2
+
+Zustand **vor dem Zielkapitel** berechnen
+
+Dafür wird rekursiv geprüft:
+
+- gibt es einen Kapitelvorgänger?
+
+- wenn nein: gibt es einen Vorgängerroman?
+
+- wenn nein: Initialwerte
+
+## Schritt 3
+
+Kapitel-Inflows laden
+
+Falls vorhanden, werden deren Endzustände ebenfalls berechnet.
+
+## Schritt 4
+
+Hauptzustand und inflows zusammenführen
+
+Dabei greift die Nexus-Regel:
+
+- `mainline_wins`
+
+- oder `chronological_last_wins`
+
+## Schritt 5
+
+Changes im Zielkapitel bis zum Zielbeat anwenden
+
+Je nach Modus:
+
+- `net`
+
+- `gross`
+
+## Schritt 6
+
+Den finalen Zustand als Tabelle zurückgeben
+
+---
+
+# Kapitel-Nexus und Inflows
+
+Ein Kapitel kann mehrere Zustandsquellen haben:
+
+- **Hauptstrang**
+
+- ein oder mehrere **Inflows**
+
+## Hauptstrang
+
+Der Hauptstrang ergibt sich aus:
+
+- `predecessor_chapter_id`
+
+- oder ersatzweise `sort_order`
+
+- oder endet, wenn `is_standalone = true`
+
+## Inflows
+
+Zusätzliche Kapitel, die in ein Zielkapitel einmünden.
+
+## Nexus-Modi
+
+### `mainline_wins`
+
+Der Hauptstrang gewinnt bei Konflikten.
+
+### `chronological_last_wins`
+
+Die spätere `scene.starts_at` gewinnt.
+
+### Gleichstand
+
+Wenn Hauptstrang und inflow dieselbe Szenenzeit haben:
+
+- Hauptstrang gewinnt
+
+Das ist bewusst so implementiert, damit eine Nebenspur bei zeitlichem Gleichstand nicht automatisch den Hauptpfad verdrängt.
+
+---
+
+# Romanvorgänger und Serienfortschreibung
+
+Ein Roman kann:
+
+- standalone beginnen
+
+- explizit auf einem Vorgängerroman aufbauen
+
+- implizit über Sortierung an einen Vorgänger angeschlossen sein
+
+## Fachliche Wirkung
+
+Wenn Kapitel 1 eines Romans keinen Kapitelvorgänger hat, wird nicht sofort mit Initialwerten gestartet. Stattdessen wird gefragt:
+
+> Gibt es einen Vorgängerroman?
+
+Wenn ja:
+
+- Zustand nach dem letzten Kapitel dieses Romans übernehmen
+
+Wenn nein:
+
+- Initialzustand verwenden
+
+## Ergebnis
+
+Die Geschichte kann über Bände hinweg als zusammenhängender Zustandsraum modelliert werden.
+
+---
+
+# Verwendung im Anwendungskontext
+
+Die Architektur ist vor allem für folgende Anwendungsszenarien geeignet:
+
+## 1. Prompt-Zusammenstellung
+
+Vor dem Schreiben eines Beats kann automatisch ein Kontextobjekt erzeugt werden mit:
+
+- Story-Variablen
+
+- erlaubtem Wissensstand
+
+- Zustand von Figuren, Orten, Objekten
+
+- Ereignisfortschritt
+
+## 2. Bedingungslogik
+
+Prompts oder UI-Komponenten können bestimmte Inhalte nur freigeben, wenn ein Zustand erfüllt ist.
+
+## 3. Story-Debugging
+
+Autoren können prüfen:
+
+- warum ein Wert gilt,
+
+- warum ein inflow gewonnen oder verloren hat,
+
+- ob ein Vorgängerroman korrekt vererbt wurde.
+
+## 4. Erweiterte Erzählarchitektur
+
+Das Modell eignet sich besonders für:
+
+- alternative Handlungspfade,
+
+- zusammenlaufende Kapitel,
+
+- Serien mit fortlaufenden Zuständen.
+
+---
+
+# Debugging-Strategie
+
+Die Architektur ist absichtlich mit Debug-Helfern ausgestattet.
+
+## `debug_state_before_chapter(...)`
+
+Zeigt:
+
+- den Zustand vor Beginn eines Kapitels
+
+Damit lässt sich prüfen:
+
+- ob Hauptvorgänger greifen,
+
+- ob inflows wirken,
+
+- ob Romanvorgänger übertragen wurden.
+
+## `debug_state_after_novel(...)`
+
+Zeigt:
+
+- den Zustand nach dem letzten Kapitel eines Romans
+
+Damit lässt sich prüfen:
+
+- ob Romanverkettung funktioniert,
+
+- ob der Übergang zum nächsten Roman plausibel ist.
+
+## Praktische Debug-Reihenfolge
+
+### 1. Linearen Pfad testen
+
+Funktioniert Kapitel 2 nach Kapitel 1?
+
+### 2. Romanwechsel testen
+
+Erbt Roman 2 korrekt von Roman 1?
+
+### 3. Nexus testen
+
+Greift der inflow wie erwartet?
+
+### 4. Gleichstand testen
+
+Gewinnt bei gleicher Szenenzeit der Hauptstrang?
+
+---
+
+# Bekannte Grenzen
+
+Auch in der aktuellen Form gibt es bewusst noch Grenzen.
+
+## 1. `is_required` bei inflows ist noch nicht aktiv
+
+Das Feld wird gespeichert und transportiert, aber noch nicht logisch erzwungen.
+
+## 2. Keine Roman-Inflows
+
+Aktuell gibt es nur:
+
+- lineare oder explizite Vorgängerromane
+
+Keine Nexus-Zusammenführung auf Romanebene.
+
+## 3. Performance bei sehr großer Rekursion
+
+Da die Logik rekursiv arbeitet, kann sie bei sehr großen Netzwerken aus Romanen und Kapiteln teurer werden.
+
+## 4. Keine automatische Validierung aller Modellfehler
+
+Zyklen werden zwar erkannt, aber nicht schon beim Schreiben der Daten vollständig verhindert.
+
+## 5. `value_json` ist formal flexibel
+
+Das ist praktisch, kann aber zu Inkonsistenzen führen, wenn die Anwendung unterschiedliche Formate erwartet.
+
+Beispiel:
+
+- nackte Zahl `4`
+
+- oder Objekt `{"value":"4"}`
+
+Beides ist technisch JSON, aber fachlich nicht dasselbe.
+
+---
+
+# Nächste sinnvolle Ausbaustufen
+
+## 1. `is_required` logisch auswerten
+
+Ein inflow könnte dann:
+
+- zwingend vorhanden sein müssen
+
+- oder optional sein
+
+## 2. Roman-Inflows
+
+Wenn Romane später ebenfalls zusammengeführt werden sollen, könnte man ergänzen:
+
+- `novel_inflows`
+
+- `novel_nexus_mode`
+
+## 3. Snapshot-/Cache-Mechanismus
+
+Für große Projekte könnte man Zustände zwischenspeichern:
+
+- pro Kapitel
+
+- pro Roman
+
+- pro Beat-Bereich
+
+## 4. Konsistenzvalidierung
+
+Beim Speichern von:
+
+- Kapitelvorgängern
+
+- inflows
+
+- Romanvorgängern
+
+könnte die Anwendung oder DB frühzeitig auf Konflikte prüfen.
+
+## 5. Einheitliches `value_json`-Schema
+
+Es wäre sinnvoll, eine klare Konvention festzulegen, etwa immer:
+
+```typescript
+{"value":"..."}
+
+```
+
+oder typabhängig konsistente JSON-Strukturen.
+
+## 6. Zustandsregeln für Codex
+
+Die Story-State-Logik könnte direkt mit Codex-Sichtbarkeit gekoppelt werden:
+
+- Einträge erst anzeigen, wenn bestimmte Variablen gesetzt sind
+
+- oder nur Inhalte berücksichtigen, die zum Szenenzeitpunkt bekannt sind
+
+---
+
+# Kurzfazit
+
+Diese Architektur bildet eine **regelbasierte, rekursive und deterministische Story-State-Engine** in Supabase.
+
+Sie ist besonders stark, weil sie:
+
+- nicht rät, sondern berechnet,
+
+- mehrere Strukturebenen integriert,
+
+- alternative Kapitelpfade unterstützt,
+
+- Romanfortschreibung erlaubt,
+
+- und für KI-Kontexte direkt nutzbar ist.
+
+Im Zentrum steht die Idee, dass ein Beat nicht isoliert betrachtet wird, sondern als Punkt in einem **logisch fortgeschriebenen Zustandsraum**.
+
+Dadurch wird KI-gestütztes Schreiben deutlich konsistenter, nachvollziehbarer und besser kontrollierbar.
+
+Wenn du möchtest, formatiere ich dir das als Nächstes noch in eine Version, die sich direkt als internes Konzeptpapier oder Whitepaper verwenden lässt.
