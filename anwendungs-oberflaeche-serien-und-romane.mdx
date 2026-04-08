@@ -1,0 +1,260 @@
+---
+title: Serien- und Roman-Oberfläche verstehen
+description: Erklärt die UI-Flows für Serien und Romane, relevante Routen, Store-Context-Werte und die Supabase-Operationen für Insert und Sortierung.
+---
+
+## Überblick: Serien- und Roman-Flow
+
+Die UI für Serien und Romane besteht im Kern aus zwei Einstiegsseiten: der Serien-Übersicht unter `/` und dem Serien-Dashboard unter `/dashboard`. Von dort führst du Nutzer:innen zu Romanen und schließlich zum Schreibbereich.
+
+<Callout kind="info">
+
+Diese Seite beschreibt nur das belegte Verhalten aus dem aktuellen Code: Routing, Context-Werte und Supabase-Operationen. Authentifizierung, Berechtigungen oder weitere Features sind hier bewusst ausgeklammert.
+
+</Callout>
+
+Die folgenden Abschnitte helfen dir, diese Flows im Code wiederzufinden und sicher zu erweitern.
+
+## Einstieg über `/` (SeriesPage)
+
+Die Route `/` rendert die `SeriesPage`. Sie zeigt vorhandene Serien als Kacheln und bietet einen Button zum Anlegen einer neuen Serie.
+
+### Serie erstellen: Button „Neue Serie“
+
+Beim Klick auf **„Neue Serie“** öffnet die UI ein Formular „Neue Serie erstellen“ mit:
+
+- Eingabefeld **Titel** (Placeholder: `Titel der Serie...`)
+- Optionales Feld **Beschreibung**
+- Button **„Erstellen“**
+
+Beim Absenden legt die Seite eine neue Serie in der `series`-Tabelle an.
+
+<CodeGroup tabs="React Snippet">
+
+```tsx
+// Metrantor/StoryMachine-6554/src/pages/Series/SeriesPage.jsx
+
+await supabase.from("series").insert({
+  title,
+  description,
+  // ggf. weitere Felder (z.B. user_id) im echten Code
+})
+```
+
+</CodeGroup>
+
+Wenn der Insert erfolgreich war, taucht die neue Serie in der Serienliste auf.
+
+### Serie auswählen: Navigation zu `/dashboard`
+
+Jede Serien-Kachel auf der `SeriesPage` repräsentiert einen Datensatz aus `series`. Beim Klick passiert:
+
+1. Der globale Store setzt `activeSeriesId` auf die ID der ausgewählten Serie.
+2. Die App navigiert nach `/dashboard`.
+
+Seiten wie das Dashboard oder die Sidebar lesen `activeSeriesId`, um nur zu dieser Serie passende Inhalte zu zeigen.
+
+<Callout kind="info">
+
+Ohne gesetzte `activeSeriesId` können Teile der UI (z.B. Roman-Liste im Dashboard) leer oder deaktiviert sein. Stelle beim Einstieg in interne Routen sicher, dass du eine Serie auswählst oder `activeSeriesId` initialisierst.
+
+</Callout>
+
+## Serien-Dashboard unter `/dashboard` (SeriesDashboard)
+
+Die Route `/dashboard` rendert das `SeriesDashboard`. Es zeigt alle Romane der aktiven Serie und bietet Aktionen zum Anlegen, Auswählen und Sortieren.
+
+### Roman erstellen: Button „Neuer Roman“
+
+Der Button **„Neuer Roman“** öffnet ein Formular mit:
+
+- Eingabefeld **Titel** (Placeholder: `Titel...`)
+- Button **„Erstellen“**
+
+Beim Absenden führt die Seite einen Insert in der `novels`-Tabelle aus. Wichtig ist dabei die Verknüpfung mit der aktiven Serie über `series_id`.
+
+<CodeGroup tabs="React Snippet">
+
+```tsx
+// Metrantor/StoryMachine-6554/src/pages/Series/SeriesDashboard.jsx
+
+await supabase.from("novels").insert({
+  title,
+  series_id: activeSeriesId,
+  // ggf. weitere Felder wie sort_order
+})
+```
+
+</CodeGroup>
+
+Der neue Roman erscheint anschließend in der Roman-Liste des Dashboards.
+
+### Roman auswählen: Navigation zu `/write`
+
+Jede Roman-Kachel im `SeriesDashboard` repräsentiert einen Datensatz aus `novels`. Beim Klick passiert:
+
+1. Der Store setzt `activeNovel` auf den ausgewählten Roman (typischerweise ein Objekt mit mindestens der Roman-ID).
+2. Die App navigiert nach `/write`.
+
+Die Schreiboberfläche unter `/write` liest `activeNovel`, um Inhalte, Kapitel oder Metadaten des ausgewählten Romans zu laden.
+
+### Romane sortieren per Drag & Drop
+
+Im `SeriesDashboard` kannst du Roman-Kacheln per Drag & Drop neu anordnen. Beim Loslassen:
+
+- Aktualisiert der Code die `sort_order`-Spalte der beteiligten `novels`-Zeilen über ein Supabase-Update.
+
+<CodeGroup tabs="React Snippet">
+
+```tsx
+// Metrantor/StoryMachine-6554/src/pages/Series/SeriesDashboard.jsx
+
+await supabase
+  .from("novels")
+  .update({ sort_order: newSortOrder })
+  .eq("id", novelId)
+```
+
+</CodeGroup>
+
+Die Roman-Liste wird im Dashboard anschließend nach `sort_order` gerendert, sodass die visuelle Reihenfolge stabil bleibt.
+
+### Navigations-Shortcuts: Einstellungen und Codex
+
+Im `SeriesDashboard` existieren zwei weitere wichtige Navigationspunkte:
+
+- **Serien-Einstellungen**: ein Link oder Button, der nach `/series/settings` navigiert.
+- **Codex-Kachel**: eine Kachel, die nach `/codex` führt und als Einstieg in den Wissens-/Codex-Bereich dient.
+
+Beide Routen können den globalen Store nutzen (z.B. `activeSeriesId`), um die richtigen Daten im jeweiligen Kontext zu laden.
+
+## Typischer UI-Flow: Von Serie zu Roman
+
+Der häufigste Flow in der Anwendung verknüpft die oben beschriebenen Aktionen zu einer durchgängigen Nutzerreise.
+
+<Steps>
+
+<Step title="Neue Serie anlegen" icon="plus">
+
+- Öffne die Route `/` mit der `SeriesPage`.
+- Klicke auf **„Neue Serie“**, fülle Titel (und optional Beschreibung) aus und bestätige mit **„Erstellen“**.
+- Warte, bis die neue Serien-Kachel erscheint.
+
+</Step>
+
+<Step title="Serie auswählen" icon="arrow-right">
+
+- Klicke auf die Kachel der gewünschten Serie.
+- Der Store setzt `activeSeriesId` und die App navigiert nach `/dashboard`.
+- Prüfe, dass das `SeriesDashboard` nun Romane für genau diese Serie zeigt (oder leer ist, wenn noch keine Romane existieren).
+
+</Step>
+
+<Step title="Neuen Roman anlegen" icon="plus">
+
+- Klicke im `SeriesDashboard` auf **„Neuer Roman“**.
+- Gib im Formular den Roman-Titel ein und wähle **„Erstellen“**.
+- Stelle sicher, dass der Roman in der Liste der aktiven Serie erscheint.
+
+</Step>
+
+<Step title="Roman auswählen und schreiben" icon="play-circle">
+
+- Klicke auf die Roman-Kachel im `SeriesDashboard`.
+- Der Store setzt `activeNovel` und navigiert nach `/write`.
+- Die Schreiboberfläche lädt nun Inhalte für den gewählten Roman.
+
+</Step>
+
+</Steps>
+
+Wenn du neue UI-Aktionen entwickelst, orientiere dich an diesem Flow und daran, wie `activeSeriesId` und `activeNovel` gesetzt werden.
+
+## Relevante Store- und Context-Werte
+
+Der globale Store (Context) stellt zentrale Statuswerte bereit, die Serien- und Roman-Seiten verbinden.
+
+### `activeSeriesId`: aktuell ausgewählte Serie
+
+`activeSeriesId` repräsentiert die ID der aktiven Serie.
+
+- **Wird gesetzt von**:
+  - `SeriesPage` (Klick auf Serien-Kachel vor Navigation nach `/dashboard`)
+- **Wird typischerweise verwendet von**:
+  - `SeriesDashboard` (`/dashboard`) zum Laden aller Romane einer Serie
+  - Sidebar und andere Seiten, die serienspezifische Aktionen oder Navigation einblenden
+
+<Callout kind="info">
+
+Wenn du neue Routen einführst, die auf eine konkrete Serie bezogen sind (z.B. Analytics für eine Serie), nutze `activeSeriesId` statt eigener lokaler State-Variablen, damit die Sidebar und andere Bereiche konsistent bleiben.
+
+</Callout>
+
+### `activeNovel`: aktuell ausgewählter Roman
+
+`activeNovel` steht für den ausgewählten Roman. Der Store hält typischerweise ein Objekt mit Metadaten, mindestens aber einer Roman-ID.
+
+- **Wird gesetzt von**:
+  - `SeriesDashboard` (Klick auf Roman-Kachel vor Navigation nach `/write`)
+- **Wird typischerweise verwendet von**:
+  - Schreiboberfläche unter `/write` (zum Laden und Speichern romanbezogener Inhalte)
+  - Weitere romanbezogene Seiten oder Komponenten, die den aktuellen Roman kennen müssen
+
+Wenn du neue Features rund um Romane baust (z.B. Statistiken, Export), hänge sie an `activeNovel` an, statt eine Roman-ID erneut durch die Routen-Parameter zu schleifen.
+
+## Relevante Supabase-Operationen (High-Level)
+
+Die Serien- und Roman-UI nutzt Supabase für grundlegende Datenoperationen. Die folgenden Muster findest du im Code wieder.
+
+### Serien einfügen
+
+Beim Erstellen einer neuen Serie ruft die `SeriesPage` ein Insert auf der `series`-Tabelle auf:
+
+- `insert` mit Feldern wie `title` und optional `description`.
+
+### Romane einfügen
+
+Beim Erstellen eines Romans im `SeriesDashboard` erfolgt:
+
+- `insert` in die `novels`-Tabelle
+- Pflichtfeld für die Verknüpfung ist `series_id`, das aus `activeSeriesId` stammt.
+
+### Sortierreihenfolge aktualisieren
+
+Beim Drag & Drop der Roman-Kacheln im `SeriesDashboard`:
+
+- `update` auf `novels` mit geändertem `sort_order`
+- Filterung typischerweise über die Roman-ID (`eq("id", novelId)`)
+
+<Callout kind="info">
+
+Die Details der Supabase-Initialisierung, Secrets und Authentifizierung liegen außerhalb dieses Guides. Nutze bestehende Initialisierungen und Konfigurationen, wenn du neue Operationen hinzufügst.
+
+</Callout>
+
+## Wo im Code?
+
+Die UI-Logik für Serien und Romane ist in wenigen Kern-Dateien konzentriert. Nutze diese Übersicht, um dich im Projekt zu orientieren.
+
+<CodeGroup tabs="Routen und Dateien">
+
+```tsx
+// Einstiegsseite für Serien
+// Route: /
+Metrantor/StoryMachine-6554/src/pages/Series/SeriesPage.jsx
+```
+
+```tsx
+// Serien-Dashboard mit Roman-Liste, Drag & Drop und Navigation
+// Route: /dashboard
+Metrantor/StoryMachine-6554/src/pages/Series/SeriesDashboard.jsx
+```
+
+```tsx
+// Globaler Store / Context mit activeSeriesId und activeNovel
+Metrantor/StoryMachine-6554/src/context/Store.jsx
+```
+
+</CodeGroup>
+
+Ergänzende Seiten wie `/write`, `/series/settings` oder `/codex` liegen in weiteren Dateien, greifen aber auf dieselben Context-Werte (`activeSeriesId`, `activeNovel`) zurück. Achte bei Änderungen darauf, diese zentralen Zustände konsistent zu verwenden, damit Navigation und Sichtbarkeit in der UI stabil bleiben.

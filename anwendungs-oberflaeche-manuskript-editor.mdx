@@ -1,0 +1,369 @@
+---
+title: Manuskript-Editor Benutzeroberfläche
+description: Technischer Leitfaden zur Manuskript-Editor-Oberfläche auf der Route write mit Layout, Kontextabhängigkeit, UI-Aktionen und Komponentenstruktur.
+---
+
+## Überblick und Kontext
+
+Der Manuskript-Editor stellt die zentrale UI zur Arbeit am Romanmanuskript dar und wird auf der Route `/write` gerendert. Die Seite ist immer an einen aktiven Roman (`activeNovel`) gebunden und zeigt den Titel in der Kopfzeile im Format `Editor: [Roman-Titel]`.
+
+<Callout kind="info">
+
+Der Manuskript-Editor lädt und speichert Daten immer relativ zum aktuell ausgewählten Roman im globalen Store (`activeNovel`). Ohne aktiven Roman sollte die Editor-Ansicht nicht erreichbar sein beziehungsweise keine Struktur anzeigen.
+
+</Callout>
+
+Der Screen teilt sich in drei Hauptbereiche:
+
+- linke Struktur-Navigation für Kapitel und Szenen (`StructureSidebar`)
+- zentraler Editorbereich zur Bearbeitung einer Szene (`SceneEditor`)
+- rechte Sidepanels mit Zusatzinformationen und Kontext (z. B. `ChapterPanel`, `CodexInfoPanel`, `NexusPanel`, `ScenePanel`)
+
+
+## Route und Kontextabhängigkeit
+
+Die Manuskript-Seite ist unter der internen Route `/write` registriert und verwendet den globalen Store-Kontext, um den aktiven Roman zu bestimmen.
+
+<CodeGroup tabs="Route,Store-Kontext">
+
+```tsx
+// src/pages/Manuscript/ManuscriptPage.jsx
+
+import ManuscriptPage from "./pages/Manuscript/ManuscriptPage"
+
+// Beispielhafte Router-Konfiguration
+<Route path="/write" element={<ManuscriptPage />} />
+```
+
+```tsx
+// src/context/Store.jsx (Auszug)
+
+const StoreContext = createContext()
+
+export const StoreProvider = ({ children }) => {
+  const [activeNovel, setActiveNovel] = useState(null)
+
+  const value = {
+    activeNovel,
+    setActiveNovel,
+    // weitere globale Zustände ...
+  }
+
+  return (
+    <StoreContext.Provider value={value}>
+      {children}
+    </StoreContext.Provider>
+  )
+}
+
+// Verwendung in ManuscriptPage
+import { useStore } from "../../context/Store"
+
+const ManuscriptPage = () => {
+  const { activeNovel } = useStore()
+
+  if (!activeNovel) {
+    // z. B. Redirect oder Placeholder, falls kein Roman aktiv ist
+  }
+
+  return (
+    <div>
+      <header>{`Editor: ${activeNovel.title}`}</header>
+      {/* Layout-Bereiche */}
+    </div>
+  )
+}
+```
+
+</CodeGroup>
+
+Wesentliche Punkte zur Kontextabhängigkeit:
+
+- `activeNovel` steuert, welche Kapitel- und Szenenstruktur in der linken Sidebar angezeigt wird.
+- Der `SceneEditor` lädt die Inhalte der aktuell ausgewählten Szene des `activeNovel`.
+- Rechte Panels (z. B. `ChapterPanel`, `CodexInfoPanel`, `NexusPanel`, `ScenePanel`) lesen Informationen zum aktiven Roman und zur aktiven Szene.
+
+
+## Layout des Manuskript-Editors
+
+Der UI-Aufbau in `ManuscriptPage` kombiniert drei Hauptzonen in einem flexiblen Layout.
+
+### Struktur-Sidebar links (`StructureSidebar`)
+
+Die linke Sidebar zeigt die hierarchische Struktur:
+
+- Kapitel-Liste des aktiven Romans
+- untergeordnete Szenen pro Kapitel
+- Schaltflächen zur Anlage neuer Kapitel/Szenen
+- Drag&Drop-Handle zur Sortierung
+
+`StructureSidebar` ist zuständig für:
+
+- Laden und Anzeigen der Struktur (`chapters` und `scenes` des `activeNovel`)
+- Verwendung von Drag&Drop zum Aktualisieren des `sort_order` von Kapiteln und Szenen
+- Delegation der Szenenauswahl an den globalen State oder lokale Hooks, damit der `SceneEditor` die gewählte Szene laden kann
+
+<CodeGroup tabs="Layout-Skizze">
+
+```tsx
+// src/pages/Manuscript/ManuscriptPage.jsx (Layout-Skizze)
+
+const ManuscriptPage = () => {
+  const { activeNovel } = useStore()
+
+  if (!activeNovel) {
+    return <div>Kein Roman ausgewählt</div>
+  }
+
+  return (
+    <div className="manuscript-layout">
+      <aside className="manuscript-sidebar-left">
+        <StructureSidebar novelId={activeNovel.id} />
+      </aside>
+
+      <main className="manuscript-main">
+        <SceneEditor />
+      </main>
+
+      <aside className="manuscript-sidebar-right">
+        {/* Accordion / Info Panels */}
+        <ChapterPanel />
+        <CodexInfoPanel />
+        <NexusPanel />
+        <ScenePanel />
+      </aside>
+    </div>
+  )
+}
+```
+
+</CodeGroup>
+
+### Hauptbereich: `SceneEditor`
+
+Der zentrale Bereich rendert den `SceneEditor`, der immer auf die aktuell ausgewählte Szene referenziert. Die Auswahl kommt aus der `StructureSidebar` beziehungsweise aus einem gemeinsamen Store oder lokalen State.
+
+Der `SceneEditor` sollte:
+
+- den Szenentitel und den eigentlichen Manuskripttext anzeigen
+- Änderungen live in den State schreiben und bei Bedarf persistent speichern
+- im Kontext des `activeNovel` arbeiten, damit Szenen-IDs eindeutig auflösbar sind
+
+### Rechte Panels: Kapitel- und Kontextinformationen
+
+Die rechte Sidebar enthält mehrere Panels, die als Accordion oder Info-Panels organisiert sind:
+
+- `ChapterPanel`: Kontextinformationen und Metadaten zum aktuell ausgewählten Kapitel
+- `CodexInfoPanel`: Worldbuilding-, Figuren- oder Setting-Daten
+- `NexusPanel`: Verknüpfungen zwischen Szenen, Plot-Strängen oder Themen
+- `ScenePanel`: Detailinformationen zur aktuellen Szene (z. B. Status, Perspektive)
+
+<Callout kind="info">
+
+Die rechte Sidebar ist informationsorientiert und liest primär Daten aus dem aktuellen Kontext (aktiver Roman, aktives Kapitel, aktive Szene). Die Panels greifen nicht direkt in Strukturänderungen ein, sondern unterstützen die Textarbeit im `SceneEditor`.
+
+</Callout>
+
+
+## Belegte UI-Aktionen in der Struktur-Sidebar
+
+Die `StructureSidebar` implementiert mehrere interaktive Aktionen, die die Manuskriptstruktur ändern oder in den Editor navigieren.
+
+### Kapitel hinzufügen
+
+Die Sidebar stellt einen Button mit Tooltip **„Kapitel hinzufügen“** (Icon `FiPlus`) bereit. Beim Klick legt die UI ein neues Kapitel für den `activeNovel` an.
+
+Funktionsweise:
+
+- Trigger: Button `Kapitel hinzufügen` in `StructureSidebar`
+- Wirkung: Erzeugt ein neues Kapitel-Objekt, typischerweise mit:
+  - Referenz auf `activeNovel.id`
+  - initialem `sort_order` am Ende der Kapitel-Liste
+  - leerem oder Standardtitel
+- UI: Das neue Kapitel erscheint sofort in der Liste und ist bereit zur Umbenennung
+
+### Szene hinzufügen
+
+Analog dazu bietet die Sidebar einen Button mit Tooltip **„Szene hinzufügen“** (Icon `FiPlus`) im Kontext eines Kapitels.
+
+Funktionsweise:
+
+- Trigger: Button `Szene hinzufügen` innerhalb eines Kapitelabschnitts
+- Wirkung:
+  - Erzeugt eine neue Szene, die dem entsprechenden Kapitel zugeordnet ist
+  - Setzt `sort_order` ans Ende der Szenenliste im Kapitel
+  - Initialisiert einen Placeholder-Titel über das Inline-Formular
+- UI: Die neue Szene erscheint eingerückt unter dem Kapitel
+
+### Titel bearbeiten (Inline-Formular)
+
+Kapitel- und Szenentitel lassen sich direkt in der Sidebar über ein Inline-Formular bearbeiten:
+
+- Eingabefeld mit Placeholder **„Titel...“**
+- Bestätigung über ein Save-Symbol (`✓`)
+
+Typisches Verhalten:
+
+- OnChange: Aktualisiert den lokalen State des Formulars
+- OnSubmit: Persistiert den neuen Titel im Backend/Store und ersetzt den Placeholder
+- Nach erfolgreichem Speichern: Anzeige des neuen Namens in der Struktur
+
+### Kapitel und Szenen per Drag&Drop sortieren
+
+Die `StructureSidebar` unterstützt Drag&Drop zum Umsortieren sowohl von Kapiteln als auch von Szenen.
+
+Wichtige Aspekte:
+
+- Nutzer zieht ein Kapitel oder eine Szene an eine neue Position
+- Drop-Event löst eine Aktualisierung der jeweiligen `sort_order`-Felder aus
+- Die neue Reihenfolge wird sofort visuell übernommen und sollte persistent gespeichert werden
+
+Die Sortierlogik sorgt dafür, dass:
+
+- Kapitel-Reihenfolge auf oberster Ebene konsistent bleibt
+- Szenen nur innerhalb ihres Kapitels (oder definierten Bereichs) neu angeordnet werden
+- nach einem Refresh die gleiche Reihenfolge wiederhergestellt wird
+
+### Szene auswählen und im `SceneEditor` bearbeiten
+
+Ein Klick auf eine Szene in der Struktur lädt diese Szene in den `SceneEditor`.
+
+Typischer Ablauf:
+
+- Sidebar setzt eine `activeSceneId` (z. B. im Store oder in lokaler State-Verwaltung)
+- `SceneEditor` reagiert auf die Änderung und lädt:
+  - Szenentitel
+  - Textkörper / Inhalte
+  - Metadaten der Szene
+- Nach dem Laden bearbeitet die Autorin den Inhalt direkt im zentralen Editorbereich
+
+<Callout kind="info">
+
+Innerhalb des dokumentierten Flows sind **keine Löschaktionen** (weder für Kapitel noch für Szenen) belegt. Es existiert also kein Delete-Button in der `StructureSidebar` oder im `SceneEditor`, der Kapitel oder Szenen entfernt.
+
+</Callout>
+
+
+## Typischer UI-Flow im Editor
+
+Der folgende Ablauf beschreibt einen typischen Nutzungs-Flow von der Auswahl eines Romans bis zur Bearbeitung einer neuen Szene.
+
+<Steps>
+
+<Step title="Roman auswählen und Editor öffnen" icon="play-circle">
+
+- Nutzerin wählt in der Anwendung einen Roman aus, wodurch `activeNovel` im globalen Store gesetzt wird.
+- Anschließend öffnet sie die Route `/write`, die `ManuscriptPage` mit dem gewählten `activeNovel` rendert.
+- In der Kopfzeile erscheint `Editor: [Roman-Titel]`, die Sidebar zeigt die Kapitel-/Szenenstruktur des Romans.
+
+</Step>
+
+<Step title="Neues Kapitel in der Struktur anlegen" icon="plus">
+
+- In der linken `StructureSidebar` klickt die Nutzerin auf den Button mit Tooltip **„Kapitel hinzufügen“**.
+- Die UI fügt am Ende der Kapitel-Liste ein neues Kapitel ein und zeigt es sofort in der Struktur an.
+- Über das Inline-Formular (Placeholder **„Titel..."**) vergibt sie einen sprechenden Kapiteltitel und speichert mit `✓`.
+
+</Step>
+
+<Step title="Neue Szene innerhalb des Kapitels erzeugen" icon="plus">
+
+- Innerhalb des neu angelegten oder eines bestehenden Kapitels klickt sie auf den Button **„Szene hinzufügen“**.
+- Die Sidebar erstellt eine neue Szene, weist sie dem Kapitel zu und ordnet sie am Ende der Szenenliste ein.
+- Die Nutzerin vergibt über das Inline-Feld ebenfalls einen Szenentitel und speichert ihn.
+
+</Step>
+
+<Step title="Kapitel und Szenen sortieren" icon="edit">
+
+- Um die Dramaturgie anzupassen, zieht sie Kapitel mit Drag&Drop an die gewünschte Position.
+- Innerhalb eines Kapitels zieht sie einzelne Szenen nach oben oder unten, um die Abfolge zu ändern.
+- Die Sidebar aktualisiert `sort_order` und behält die Reihenfolge über Reloads hinweg bei.
+
+</Step>
+
+<Step title="Szene auswählen und Text bearbeiten" icon="code">
+
+- Ein Klick auf die gewünschte Szene markiert diese als aktiv und setzt intern eine `activeSceneId`.
+- `SceneEditor` lädt die gewählte Szene und zeigt Titel, Text und relevante Metadaten im Hauptbereich an.
+- Die Nutzerin bearbeitet den Text; der Editor speichert Änderungen über den konfigurierten Persistenzmechanismus.
+
+</Step>
+
+<Step title="Kontext über Info-Panels einblenden" icon="info">
+
+- In der rechten Sidebar öffnet sie bei Bedarf Accordion-/Info-Panels wie `ChapterPanel`, `CodexInfoPanel`, `NexusPanel` oder `ScenePanel`.
+- Diese Panels zeigen Zusatzinformationen zum aktuellen Kapitel, Worldbuilding-Daten oder Szenen-Metadaten.
+- Die Informationen unterstützen die Schreibarbeit, ohne die Struktur oder Textreihenfolge direkt zu verändern.
+
+</Step>
+
+</Steps>
+
+
+## Technischer Aufbau und relevante Komponenten
+
+Dieser Abschnitt listet die zentralen Komponenten-Dateien, die am Manuskript-Editor beteiligt sind, und skizziert ihre jeweilige Rolle.
+
+<CodeGroup tabs="Komponenten-Übersicht">
+
+```tsx
+// src/pages/Manuscript/ManuscriptPage.jsx
+
+// Root-Komponente für die Route `/write`.
+// Verantwortlich für:
+// - Lesen von `activeNovel` aus dem Store
+// - Layout mit linker Sidebar, SceneEditor und rechten Panels
+// - Weitergabe der Roman-ID an die Sidebar
+```
+
+```tsx
+// src/pages/Manuscript/StructureSidebar.jsx
+
+// Linke Struktur-Navigation.
+// Verantwortlich für:
+// - Laden/Anzeigen der Kapitel- und Szenenstruktur des aktiven Romans
+// - Aktionen: Kapitel hinzufügen, Szene hinzufügen, Titel inline bearbeiten
+// - Drag&Drop zum Neuordnen (aktualisiert `sort_order` für Kapitel/Szenen)
+// - Triggern der Szenenauswahl (z. B. Setzen von `activeSceneId`)
+```
+
+```tsx
+// src/pages/Manuscript/SceneEditor.jsx
+
+// Zentraler Editorbereich.
+// Verantwortlich für:
+// - Anzeigen der aktuell ausgewählten Szene (Titel, Text, Metadaten)
+// - Editieren und Speichern des Szenentextes
+// - Reaktion auf Änderungen der aktiven Szene (z. B. `activeSceneId`)
+```
+
+```tsx
+// src/pages/Manuscript/ChapterPanel.jsx
+// src/pages/Manuscript/CodexInfoPanel.jsx
+// src/pages/Manuscript/NexusPanel.jsx
+// src/pages/Manuscript/ScenePanel.jsx
+
+// Rechte Info-Panels / Accordion-Bereiche.
+// Verantwortlich für:
+// - Anzeigen von Kontextinformationen zum aktuellen Kapitel und zur Szene
+// - Einbinden von Worldbuilding- oder Vernetzungsdaten
+// - Lesende Unterstützung der Editorarbeit (keine Strukturmanipulation)
+```
+
+```tsx
+// src/context/Store.jsx
+
+// Globaler Store / Context.
+// Verantwortlich für:
+// - Verwalten von `activeNovel` und ggf. `activeSceneId`
+// - Bereitstellen der Referenzdaten für ManuscriptPage, Sidebar, Editor und Panels
+```
+
+</CodeGroup>
+
+<Callout kind="info">
+
+Der aktuelle Editor-Flow umfasst Anlage, Umbenennung, Auswahl und Sortierung von Kapiteln und Szenen sowie die Bearbeitung von Szenentexten. **Delete-Aktionen (Löschen von Kapiteln/Szenen) sind im beschriebenen UI-Stand nicht implementiert** und sollten bei Erweiterungen klar und konsistent ergänzt werden.
+
+</Callout>

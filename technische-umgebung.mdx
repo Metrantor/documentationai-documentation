@@ -1,0 +1,65 @@
+---
+title: Technische Umgebung von AuraWrite
+description: Verstehe, in welcher technischen Umgebung AuraWrite läuft, welche Voraussetzungen gelten und wie du über den Browser auf die Webanwendung zugreifst.
+---
+
+## Überblick
+
+AuraWrite läuft als reine Webanwendung im Browser und benötigt keine lokale Installation oder Downloads. Die gesamte Arbeit mit Dokumenten findet client-seitig in deinem Webbrowser statt, der über eine stabile Internetverbindung mit dem Dienst verbunden ist.
+
+## Serverseitige Infrastruktur (Stand: Codebasis)
+
+Die aktuelle Codebasis liefert einige Hinweise zur technischen Infrastruktur, ohne den konkreten Hosting-Provider zweifelsfrei zu benennen.
+
+Das Frontend wird mit einem Vite-Build als statisches Bundle erzeugt. Der Build-Output ist auf ein `dist`-Verzeichnis konfiguriert, was typisch für statische Webanwendungen ist und eine Auslieferung über statisches Hosting oder ein Content Delivery Network ermöglicht.
+
+In der Anwendung ist zudem ein Supabase JavaScript Client eingebunden, der ein Supabase-Backend als Service ansteuert. Dieses Backend übernimmt in der Architektur naheliegend Funktionen wie Datenhaltung und Authentifizierung, ohne dass in der Codebasis sensible Verbindungsdetails offengelegt werden.
+
+<Callout kind="alert">
+
+Die Codebasis enthält keine eindeutige Infrastruktur- oder Hosting-Konfiguration wie `netlify.toml`, Terraform-, CDK- oder CloudFormation-Stacks. Wenn ihr in eurer Umgebung konkret AWS, Netlify oder andere Provider verwendet, ergänzt hier die bestätigten Details, zum Beispiel:
+
+- verwendete Cloud-Region
+- angebundenes CDN und Caching-Strategie
+- genutzte Storage-Dienste für statische Assets und Uploads
+- Deploy-Pipeline inklusive Build- und Release-Schritten
+
+</Callout>
+
+## Client-Umgebung (Browser)
+
+AuraWrite setzt auf eine moderne Browser-Umgebung als technischen Ausführungskontext. Du arbeitest direkt im Browserfenster, ohne zusätzliche Desktop-App oder Plug-in.
+
+Wichtige Eigenschaften der Client-Umgebung:
+
+- Die Benutzeroberfläche rendert vollständig im Browser.
+- Die Interaktion mit Dokumenten, Einstellungen und Projekten erfolgt über Standard-Webtechnologien.
+- Updates der Anwendung werden zentral bereitgestellt, sodass du im Browser immer die aktuelle Version nutzt.
+
+Solange du einen der unterstützten Browser verwendest und online bist, kannst du AuraWrite von jedem geeigneten Gerät aus nutzen.
+
+## Netzwerk und Zugriff
+
+AuraWrite erfordert eine aktive Netzwerkverbindung, damit der Browser mit dem Dienst kommunizieren kann. Ohne stabile Internetverbindung kannst du nicht auf die Anwendung zugreifen oder Inhalte laden.
+
+Greife über folgende URL auf AuraWrite zu:
+
+- `https://app.aurawrite.com`
+
+Öffne diese Adresse in deinem bevorzugten unterstützten Browser, um dich anzumelden, Dokumente zu bearbeiten oder neue Inhalte anzulegen.
+
+## Voraussetzungen
+
+Für den produktiven Einsatz von AuraWrite musst du nur wenige technische Voraussetzungen erfüllen.
+
+<Callout kind="info">
+
+Du benötigst:
+
+- **Einen modernen Webbrowser**: Chrome, Firefox, Safari oder Edge
+- **Eine E-Mail-Adresse**: für die Konto-Registrierung und Anmeldung
+- **Eine stabile Internetverbindung**: für den Zugriff auf `https://app.aurawrite.com`
+
+AuraWrite läuft vollständig im Browser, sodass du keine zusätzliche Software installieren oder Dateien herunterladen musst.
+
+</Callout>

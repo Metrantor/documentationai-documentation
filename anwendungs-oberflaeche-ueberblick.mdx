@@ -1,0 +1,191 @@
+---
+title: Anwendungsoberfläche von AuraWrite verstehen
+description: Überblick über Layout, Sidebar-Navigation, React-Routes und Kontextauswahl in der AuraWrite-Anwendung mit Einstiegspunkten zu Detailseiten.
+---
+
+## Überblick: UI-Architektur und Layout
+
+AuraWrite nutzt React mit React Router, Vite als Build-Tool und Tailwind CSS für das Styling. Das Kernlayout besteht aus einem `AppProvider`/Store und einem `AppLayout`, das eine Sidebar-Navigation und einen zentralen `Outlet` für die jeweils aktive Route rendert.
+
+<Callout kind="info">
+
+Stand: Analyse der aktuellen Codebasis (`Metrantor/StoryMachine-6554`). Aussagen beziehen sich nur auf implementierte Routen, Layouts und Stores, nicht auf Backend- oder Auth-Infrastruktur.
+
+</Callout>
+
+Die globale Struktur folgt dem Muster: Der `AppProvider` stellt Kontext (inklusive `activeSeriesId` und `activeNovel`) bereit, `AppLayout` rendert die Sidebar abhängig von diesem Kontext und der `Outlet` zeigt die gewählte Seite (`SeriesPage`, `SeriesDashboard`, `ManuscriptPage` usw.).
+
+## Hauptbereiche der UI
+
+Die folgenden Karten geben einen Einstieg in die wichtigsten Bereiche der Anwendungsoberfläche und verlinken auf Detailseiten mit UI-spezifischer Dokumentation.
+
+<Columns cols={3}>
+
+<Card title="Serien und Romane" href="anwendungs-oberflaeche-serien-und-romane" icon="folder" cta="Zu Serien & Romanen">
+
+Übersicht über Serien-Listing, Auswahl einer aktiven Serie und die Beziehung zu einzelnen Romanen (`activeSeriesId`, `activeNovel`).
+
+</Card>
+
+<Card title="Manuskript-Editor" href="anwendungs-oberflaeche-manuskript-editor" icon="code" cta="Zum Editor">
+
+Editor-Oberfläche für Romane, erreichbar über die `/write`-Route, abhängig von einer aktiven Roman-Auswahl.
+
+</Card>
+
+<Card title="Codex" href="anwendungs-oberflaeche-codex" icon="book-open" cta="Zum Codex">
+
+Wissens- und Kontextbereich zu einer Serie (`/codex`), mit Layout und Navigation innerhalb der Codex-Seite.
+
+</Card>
+
+</Columns>
+
+<Columns cols={3}>
+
+<Card title="Prompt-Bibliothek" href="anwendungs-oberflaeche-prompt-bibliothek" icon="zap" cta="Zu Prompts">
+
+Globale Prompt-Verwaltung auf `/prompts`, unabhängig von einer aktiven Serie, aber eingebettet in das gleiche AppLayout.
+
+</Card>
+
+<Card title="Timeline" href="anwendungs-oberflaeche-timeline" icon="clock" cta="Zur Timeline">
+
+Zeitachsen-Ansicht pro Serie auf `/timeline`, sichtbar nur bei gewählter Serie.
+
+</Card>
+
+<Card title="Einstellungen" href="anwendungs-oberflaeche-einstellungen" icon="settings" cta="Zu Einstellungen">
+
+Konfigurationsseiten für Serien (`/series/settings`) und Romane (`/novel/settings`), gesteuert über den UI-Kontext.
+
+</Card>
+
+</Columns>
+
+## Route-Map (kurz)
+
+Die App verwendet React Router mit einer Handvoll zentraler Pfade, die jeweils eine Page-Komponente rendern.
+
+### Wichtige Routen und zugehörige Screens
+
+- `/` → `SeriesPage`  
+  Listing bzw. Auswahl von Serien und Einstieg in serienbezogene Arbeitsbereiche.
+
+- `/dashboard` → `SeriesDashboard`  
+  Übersicht zur aktiven Serie (abhängig von `activeSeriesId`).
+
+- `/write` → `ManuscriptPage`  
+  Manuskript-Editor für den aktuell gewählten Roman (`activeNovel`).
+
+- `/codex` → `CodexPage`  
+  Codex-/Kontextbereich für die aktive Serie.
+
+- `/prompts` → `PromptLibraryPage`  
+  Globale Prompt-Bibliothek, unabhängig von einer spezifischen Serie oder einem Roman.
+
+- `/timeline` → `TimelinePage`  
+  Timeline-Ansicht der aktiven Serie.
+
+- `/series/settings` → `SeriesSettingsPage`  
+  Einstellungen für die aktuell ausgewählte Serie.
+
+- `/novel/settings` → `NovelSettingsPage`  
+  Einstellungen für den aktuell ausgewählten Roman.
+
+Die Routen hängen alle unter dem gemeinsamen AppLayout mit Sidebar und nutzen den React Router `Outlet`, um die jeweilige Page-Komponente in denselben Rahmen einzubetten.
+
+## Konzept: Kontext-Auswahl und Navigation
+
+Die Sidebar und große Teile der Navigation sind kontextabhängig. Zwei zentrale Zustände steuern, was der Benutzer sehen kann:
+
+- `activeSeriesId` – identifiziert die aktuell ausgewählte Serie.
+- `activeNovel` – identifiziert den aktuell ausgewählten Roman innerhalb einer Serie.
+
+Die Sidebar unterscheidet drei Arten von Navigation:
+
+- **Globale Bereiche**  
+  Z. B. die Prompt-Bibliothek auf `/prompts`, die unabhängig von `activeSeriesId` oder `activeNovel` zugänglich ist.
+
+- **Serienbezogene Bereiche**  
+  Routen wie `/dashboard`, `/codex`, `/timeline` und `/series/settings` erfordern eine aktive Serie. Die Sidebar rendert die entsprechenden Links nur, wenn `activeSeriesId` gesetzt ist.
+
+- **Romanbezogene Bereiche**  
+  Routen wie `/write` und `/novel/settings` hängen zusätzlich von einem aktiven Roman-Kontext (`activeNovel`) ab. Die Sidebar blendet diese Links ein, sobald ein Roman in der aktiven Serie ausgewählt ist.
+
+<Callout kind="info">
+
+Die kontextabhängige Sidebar wird in `Sidebar.jsx` umgesetzt. Sie liest `activeSeriesId` und `activeNovel` aus dem globalen Store bzw. Kontext und entscheidet daraus, welche Link-Sektionen gerendert werden.
+
+</Callout>
+
+### Typischer Ablauf der Kontextwahl
+
+<Steps>
+
+<Step title="Serie auswählen" icon="folder">
+
+Der Benutzer landet auf `/` (`SeriesPage`) und wählt eine Serie. Der Store setzt `activeSeriesId`. Ab diesem Zeitpunkt erscheinen serienbezogene Links (z. B. Dashboard, Codex, Timeline, Series Settings) in der Sidebar.
+
+</Step>
+
+<Step title="Roman auswählen" icon="book-open">
+
+Innerhalb der aktiven Serie wählt der Benutzer einen Roman. Die Anwendung setzt `activeNovel`. Daraufhin rendert die Sidebar romanbezogene Links wie den Editor (`/write`) und Roman-Einstellungen (`/novel/settings`).
+
+</Step>
+
+<Step title="Kontextbezogene Navigation" icon="arrow-right">
+
+Mit gesetztem Kontext navigiert der Benutzer zwischen den Routen (`/dashboard`, `/codex`, `/timeline`, `/write`, `/series/settings`, `/novel/settings`), ohne dass der Kontext verloren geht. Das Layout bleibt konstant, der `Outlet` tauscht nur die Page-Komponente.
+
+</Step>
+
+</Steps>
+
+Dieses Muster erlaubt es, UI-Funktionen eng an die aktuell relevante Serie bzw. den ausgewählten Roman zu koppeln, ohne globale Navigationslogik zu duplizieren.
+
+## Wo im Code?
+
+Die folgende Übersicht zeigt, wo die beschriebenen Strukturen im Repository verankert sind. Pfade dienen als Einstieg für weitere Analysen oder UI-Erweiterungen.
+
+- **Routen und Layout**
+
+  - `src/App.jsx`  
+    Definiert die React Router-Routen (`/`, `/dashboard`, `/write`, `/codex`, `/prompts`, `/timeline`, `/series/settings`, `/novel/settings`) und bindet `AppProvider` sowie `AppLayout` ein.
+
+  - `src/components/layout/AppLayout.jsx` (oder vergleichbare Datei)  
+    Enthält das Hauptlayout mit Sidebar und `Outlet` für die Page-Komponenten.
+
+- **Sidebar und Navigation**
+
+  - `src/components/layout/Sidebar.jsx`  
+    Implementiert die kontextabhängige Sidebar. Liest `activeSeriesId` und `activeNovel` aus dem Store/Kontext und rendert globale, serienbezogene und romanbezogene Links.
+
+- **Page-Komponenten**
+
+  - `src/pages/Series/SeriesPage.jsx`  
+    Render-Logik für die Serienübersicht auf `/`.
+
+  - `src/pages/Series/SeriesDashboard.jsx`  
+    Dashboard zur aktiven Serie auf `/dashboard`.
+
+  - `src/pages/Manuscript/ManuscriptPage.jsx`  
+    UI des Manuskript-Editors auf `/write`.
+
+  - `src/pages/Codex/CodexPage.jsx`  
+    Codex-Ansicht auf `/codex`.
+
+  - `src/pages/PromptLibrary/PromptLibraryPage.jsx`  
+    Prompt-Bibliothek auf `/prompts`.
+
+  - `src/pages/Timeline/TimelinePage.jsx`  
+    Timeline-Ansicht auf `/timeline`.
+
+  - `src/pages/Series/SeriesSettingsPage.jsx`  
+    Serien-Einstellungen auf `/series/settings`.
+
+  - `src/pages/Novel/NovelSettingsPage.jsx`  
+    Roman-Einstellungen auf `/novel/settings`.
+
+Diese Übersicht ist der Einstiegspunkt. Die verlinkten Detailseiten unter **Hauptbereiche der UI** beschreiben jeweils die konkrete Oberfläche, Interaktionen und relevante Komponenten pro Bereich.

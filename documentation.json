@@ -9,116 +9,141 @@
     }
   },
   "navigation": {
-    "tabs": [
+    "dropdowns": [
       {
-        "tab": "Documentation",
-        "icon": "book",
-        "groups": [
+        "dropdown": "Development",
+        "icon": "rocket",
+        "path": "development",
+        "tabs": [
           {
-            "group": "Getting Started",
-            "icon": "rocket",
+            "tab": "Documentation",
+            "icon": "book",
+            "groups": [
+              {
+                "group": "Getting Started",
+                "icon": "rocket",
+                "pages": [
+                  {
+                    "title": "Introduction",
+                    "path": "introduction",
+                    "icon": "home"
+                  },
+                  {
+                    "title": "Quickstart",
+                    "path": "quickstart",
+                    "icon": "zap"
+                  }
+                ]
+              },
+              {
+                "group": "Kern-Konzepte",
+                "icon": "layers",
+                "pages": [
+                  {
+                    "title": "Features",
+                    "path": "features",
+                    "icon": "file-text"
+                  },
+                  {
+                    "title": "Technische Umgebung",
+                    "path": "technische-umgebung",
+                    "icon": "server"
+                  }
+                ]
+              },
+              {
+                "group": "Advanced",
+                "icon": "package",
+                "pages": [
+                  {
+                    "title": "Integrations",
+                    "path": "integrations",
+                    "icon": "plug"
+                  }
+                ]
+              },
+              {
+                "group": "Konzepte",
+                "pages": []
+              },
+              {
+                "group": "Anwendungs-Oberfläche",
+                "pages": []
+              }
+            ]
+          },
+          {
+            "tab": "API Reference",
+            "icon": "code",
+            "groups": [
+              {
+                "group": "Endpoints",
+                "openapi": "api-reference/openapi.yaml",
+                "pages": []
+              }
+            ]
+          },
+          {
+            "tab": "Help Center",
+            "icon": "help-circle",
             "pages": [
               {
-                "title": "Introduction",
-                "path": "introduction",
+                "title": "Help Center",
+                "path": "help-center",
                 "icon": "home"
               },
               {
-                "title": "Quickstart",
-                "path": "quickstart",
-                "icon": "zap"
+                "group": "FAQs",
+                "icon": "help-circle",
+                "expandable": false,
+                "pages": [
+                  {
+                    "title": "How to Add Collaborator",
+                    "path": "help-center/faq/how-to-add-collaborator"
+                  }
+                ]
+              },
+              {
+                "group": "Troubleshooting",
+                "icon": "alert-triangle",
+                "expandable": false,
+                "pages": [
+                  {
+                    "title": "Editor Not Loading",
+                    "path": "help-center/troubleshooting/editor-not-loading"
+                  }
+                ]
+              },
+              {
+                "group": "Guides",
+                "icon": "book-open",
+                "expandable": false,
+                "pages": [
+                  {
+                    "title": "Create New Document",
+                    "path": "help-center/guides/create-new-document"
+                  }
+                ]
               }
             ]
           },
           {
-            "group": "Core Concepts",
-            "icon": "layers",
+            "tab": "Changelog",
+            "icon": "clock",
             "pages": [
               {
-                "title": "Features",
-                "path": "features",
-                "icon": "file-text"
-              }
-            ]
-          },
-          {
-            "group": "Advanced",
-            "icon": "package",
-            "pages": [
-              {
-                "title": "Integrations",
-                "path": "integrations",
-                "icon": "plug"
+                "title": "Release History",
+                "path": "changelog",
+                "icon": "history"
               }
             ]
           }
         ]
       },
       {
-        "tab": "API Reference",
-        "icon": "code",
-        "groups": [
-          {
-            "group": "Endpoints",
-            "openapi": "api-reference/openapi.yaml",
-            "pages": []
-          }
-        ]
-      },
-      {
-        "tab": "Help Center",
-        "icon": "help-circle",
-        "pages": [
-          {
-            "title": "Help Center",
-            "path": "help-center",
-            "icon": "home"
-          },
-          {
-            "group": "FAQs",
-            "icon": "help-circle",
-            "expandable": false,
-            "pages": [
-              {
-                "title": "How to Add Collaborator",
-                "path": "help-center/faq/how-to-add-collaborator"
-              }
-            ]
-          },
-          {
-            "group": "Troubleshooting",
-            "icon": "alert-triangle",
-            "expandable": false,
-            "pages": [
-              {
-                "title": "Editor Not Loading",
-                "path": "help-center/troubleshooting/editor-not-loading"
-              }
-            ]
-          },
-          {
-            "group": "Guides",
-            "icon": "book-open",
-            "expandable": false,
-            "pages": [
-              {
-                "title": "Create New Document",
-                "path": "help-center/guides/create-new-document"
-              }
-            ]
-          }
-        ]
-      },
-      {
-        "tab": "Changelog",
-        "icon": "clock",
-        "pages": [
-          {
-            "title": "Release History",
-            "path": "changelog",
-            "icon": "history"
-          }
-        ]
+        "dropdown": "Anwendung",
+        "pages": [],
+        "path": "anwendung"
       }
     ]
   }

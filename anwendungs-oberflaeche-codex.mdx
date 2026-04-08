@@ -1,0 +1,491 @@
+---
+title: Codex Oberflaeche
+description: Erlaeuterung der Codex-Oberflaeche unter Route slashcodex, UI-Aufbau, Aktionen, Tabs sowie relevante Komponenten und Utils im Code.
+---
+
+## Ueberblick und Kontext
+
+Die Codex-Oberflaeche stellt serienbezogene Wissenseintraege bereit, die du ueber die Route `/codex` bearbeiten kannst.
+
+<Callout kind="info">
+
+Codex ist immer an die aktuell aktive Serie gebunden. Die Sidebar blendet den Codex-Eintrag nur ein, wenn `activeSeriesId` gesetzt ist. Ohne aktive Serie laedt die CodexPage keine Eintraege und Aktionen wie Anlegen, Bearbeiten oder Loeschen sind nicht verfuegbar.
+
+</Callout>
+
+Die Seite kombiniert eine linke Spalte mit Such- und Filtermoeglichkeiten sowie einer Eintragsliste mit einem rechten Detailbereich, in dem du den aktuell ausgewaehlten Codex-Eintrag inklusive aller Tabs bearbeitest.
+
+## Route und Serienkontext
+
+Die Codex-Oberflaeche haengt direkt an der Hauptanwendung und nutzt den zentralen Store, um die aktive Serie zu bestimmen.
+
+- **Route:** `/codex`
+- **Serienkontext:** Verwendung von `activeSeriesId` aus dem Store
+- **Sichtbarkeit:** Sidebar-Link zu Codex nur, wenn eine Serie aktiv ist
+
+<CodeGroup tabs="CodexPage,Store">
+
+```tsx
+// Metrantor/StoryMachine-6554/src/pages/Codex/CodexPage.jsx
+
+import { useStore } from "../context/Store"
+
+export function CodexPage() {
+  const { activeSeriesId } = useStore()
+
+  if (!activeSeriesId) {
+    return (
+      <div>
+        <h2>Keine Serie aktiv</h2>
+        <p>Aktiviere zuerst eine Serie, um den Codex zu bearbeiten.</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="codex-page">
+      {/* linke Liste + Filter */}
+      {/* rechter Detailbereich mit Tabs */}
+    </div>
+  )
+}
+```
+
+```tsx
+// Metrantor/StoryMachine-6554/src/context/Store.jsx
+
+export function StoreProvider({ children }) {
+  const [activeSeriesId, setActiveSeriesId] = useState<string | null>(null)
+
+  const value = {
+    activeSeriesId,
+    setActiveSeriesId,
+    // weitere zustandswerte wie codexEntries
+  }
+
+  return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>
+}
+```
+
+</CodeGroup>
+
+## UI-Aufbau: Liste links, Details rechts
+
+Die CodexPage ist grundsaetzlich zweigeteilt:
+
+- **Linke Seite:** Suche, Filter, Liste der Codex-Eintraege
+- **Rechte Seite:** Detailansicht des ausgewaehlten Eintrags mit Tabs wie Aliases, Ausschluesse, Beziehungen, Codex-Details und zusaetzlichen Panels wie ConditionalEntriesPanel und ImageUploadPanel
+
+### Linke Spalte: Suche, Filter, Eintragsliste
+
+Die linke Spalte dient zur Navigation zwischen Codex-Eintraegen.
+
+Typische Elemente:
+
+- **Suchfeld** zum Filtern nach Titel oder Begriff
+- **Filteroptionen** (z. B. Kategorien, Typen, Status)
+- **Liste der Eintraege**, in der du einen Eintrag auswaehlst, um ihn im rechten Bereich zu laden
+- **Plus-Button (FiPlus)**, um einen neuen Codex-Eintrag anzulegen
+
+Die Auswahl eines Eintrags aktualisiert den Zustand der CodexPage und laedt dessen Daten im Detailbereich.
+
+### Rechte Spalte: Detailbereich mit Tabs
+
+Der rechte Bereich zeigt den aktuell ausgewaehlten Codex-Eintrag und stellt mehrere Tabs bzw. Unterbereiche zur Bearbeitung bereit:
+
+- **Codex-Details:** Hauptdaten des Eintrags wie Titel, Beschreibung, ggf. Typ
+- **Aliases:** Alternativbezeichnungen, Synonyme oder Schreibvarianten
+- **Ausschluesse:** Begriffe oder Muster, die explizit nicht matchen sollen
+- **Beziehungen:** Referenzen auf andere Codex-Eintraege oder Entities
+- **ConditionalEntriesPanel:** Bedingte Eintraege oder kontextsensitive Informationen
+- **ImageUploadPanel:** Hochladen und Verwalten von Bildern zu einem Codex-Eintrag
+
+Die Tabs sind ueber Panel-Komponenten gekapselt, die Codex-spezifische Logik und Formulare enthalten.
+
+<CodeGroup tabs="Panels,Page-Layout">
+
+```tsx
+// Metrantor/StoryMachine-6554/src/pages/Codex/CodexPage.jsx
+
+import { AliasesPanel } from "./AliasesPanel"
+import { ExclusionsPanel } from "./ExclusionsPanel"
+import { RelationsPanel } from "./RelationsPanel"
+import { ConditionalEntriesPanel } from "./ConditionalEntriesPanel"
+import { ImageUploadPanel } from "./ImageUploadPanel"
+import { CodexDetailsPanel } from "./CodexDetailsPanel"
+
+export function CodexPageContent({ selectedEntry }) {
+  if (!selectedEntry) {
+    return <div>Waehle links einen Eintrag aus oder lege einen neuen an.</div>
+  }
+
+  return (
+    <div className="codex-detail">
+      <CodexDetailsPanel entry={selectedEntry} />
+
+      <div className="codex-tabs">
+        <AliasesPanel entry={selectedEntry} />
+        <ExclusionsPanel entry={selectedEntry} />
+        <RelationsPanel entry={selectedEntry} />
+        <ConditionalEntriesPanel entry={selectedEntry} />
+        <ImageUploadPanel entry={selectedEntry} />
+      </div>
+    </div>
+  )
+}
+```
+
+```tsx
+// UI-Skizze fuer das Hauptlayout der CodexPage
+
+export function CodexPageLayout() {
+  return (
+    <div className="codex-layout">
+      <aside className="codex-sidebar">
+        {/* Suche, Filter, Eintragsliste, FiPlus-Button */}
+      </aside>
+
+      <main className="codex-main">
+        {/* Detailbereich mit Bearbeiten-/Speichern-/Loeschen-Aktionen und Tabs */}
+      </main>
+    </div>
+  )
+}
+```
+
+</CodeGroup>
+
+## Aktionen in der Codex-Oberflaeche
+
+Die CodexPage stellt eine Reihe von Aktionen bereit, die ueber Buttons im UI erreichbar sind und intern den Store bzw. API-Calls ansteuern.
+
+### Eintrag anlegen (Plus-Button)
+
+Der **FiPlus-Button** in der linken Spalte legt einen neuen Codex-Eintrag an.
+
+Typisches Verhalten:
+
+- Erzeugt einen leeren oder mit Defaults vorbelegten Eintrag
+- Fuegt den Eintrag der Liste links hinzu
+- Setzt den neuen Eintrag als ausgewaehlt, sodass der Detailbereich rechts auf den neuen Eintrag springt
+
+### Bearbeiten-Toggle
+
+Der **Bearbeiten-Button** schaltet den Detailbereich in einen editierbaren Zustand.
+
+- Im Nicht-Bearbeitungsmodus zeigt die Seite die Daten readonly
+- Im Bearbeitungsmodus werden Felder und Panels schreibbar und ermoeglichen Aenderungen
+- Das Bearbeiten-Toggle beeinflusst sowohl den CodexDetailsPanel als auch die Tab-Panels (z. B. AliasesPanel, ExclusionsPanel)
+
+### Speichern eines Eintrags
+
+Der **Speichern-Button** persistiert die vorgenommenen Aenderungen.
+
+Typische Schritte:
+
+- Validierung der Eingaben im CodexDetailsPanel und in den Tab-Panels
+- Aggregation aller geaenderten Felder in ein Update-Objekt
+- Dispatch eines Actions oder Aufruf einer API-Funktion zum Aktualisieren des Codex-Eintrags fuer die aktuelle `activeSeriesId`
+- Rueckkehr in den Nicht-Bearbeitungsmodus nach erfolgreichem Speichern
+
+### Loeschen eines Eintrags mit Confirm-Dialog
+
+Die Aktion **Eintrag loeschen** entfernt einen Codex-Eintrag und ist durch einen Confirm-Dialog abgesichert.
+
+Ablauf:
+
+1. Nutzer klickt auf **Eintrag loeschen**.
+2. Dialog zeigt: **Eintrag wirklich loeschen?**
+3. Nutzer bestaetigt mit **Ja, loeschen** oder bricht ab.
+4. Bei Bestaetigung entfernt der Code den Eintrag aus der Liste und setzt den ausgewaehlten Eintrag entsprechend neu (z. B. naechster oder kein Eintrag ausgewaehlt).
+
+<CodeGroup tabs="Aktionen,Confirm-Dialog">
+
+```tsx
+// Metrantor/StoryMachine-6554/src/pages/Codex/CodexActions.jsx
+
+export function CodexActions({ selectedEntry, onSave, onDelete, editing, setEditing }) {
+  return (
+    <div className="codex-actions">
+      <button type="button" onClick={() => setEditing(!editing)}>
+        {editing ? "Bearbeiten beenden" : "Bearbeiten"}
+      </button>
+
+      <button
+        type="button"
+        onClick={() => onSave(selectedEntry)}
+        disabled={!editing}
+      >
+        Speichern
+      </button>
+
+      <DeleteEntryButton entry={selectedEntry} onDelete={onDelete} />
+    </div>
+  )
+}
+```
+
+```tsx
+// Metrantor/StoryMachine-6554/src/pages/Codex/DeleteEntryButton.jsx
+
+function DeleteEntryButton({ entry, onDelete }) {
+  const [open, setOpen] = useState(false)
+
+  const handleConfirm = () => {
+    onDelete(entry.id)
+    setOpen(false)
+  }
+
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)}>
+        Eintrag loeschen
+      </button>
+
+      {open && (
+        <div className="confirm-dialog">
+          <p>Eintrag wirklich loeschen?</p>
+          <button type="button" onClick={handleConfirm}>
+            Ja, loeschen
+          </button>
+          <button type="button" onClick={() => setOpen(false)}>
+            Abbrechen
+          </button>
+        </div>
+      )}
+    </>
+  )
+}
+```
+
+</CodeGroup>
+
+## Tabs und Panel-Komponenten
+
+Die Logik der einzelnen Teilbereiche des Codex ist ueber spezialisierte Panel-Komponenten gekapselt. Dadurch bleibt die CodexPage uebersichtlich und gut erweiterbar.
+
+### AliasesPanel
+
+Das `AliasesPanel.jsx` verwaltet Alternativbezeichnungen und Synonyme eines Codex-Eintrags.
+
+- Listet vorhandene Aliases
+- Ermoeglicht das Hinzufuegen, Bearbeiten und Entfernen von Aliases im Bearbeitungsmodus
+- Synchronisiert Aenderungen mit dem Hauptzustand des Codex-Eintrags
+
+### ExclusionsPanel
+
+Das `ExclusionsPanel.jsx` kapselt Ausschlussregeln fuer den Codex-Eintrag.
+
+- Verwaltet Begriffe oder Muster, die nicht als Treffer gewertet werden sollen
+- Oft in enger Kopplung mit Matching-Logik, um false positives zu reduzieren
+
+### RelationsPanel
+
+Das `RelationsPanel.jsx` modelliert Beziehungen zwischen Codex-Eintraegen.
+
+- Verknuepft Eintraege untereinander (z. B. "ist Teil von", "ist Variante von")
+- Dient der spaeteren Navigation und semantischen Einordnung im Editor
+
+### ConditionalEntriesPanel
+
+Das `ConditionalEntriesPanel.jsx` behandelt bedingte Inhalte.
+
+- Hinterlegt Eintraege, die nur unter bestimmten Kontextbedingungen aktiv sein sollen
+- Nutzt haeufig zusaetzliche Felder wie Kontexte, Tags oder Flags
+
+### CodexDetailsPanel
+
+Das `CodexDetailsPanel.jsx` bildet die Kerninformationen eines Eintrags ab.
+
+- Titel, Beschreibung und evtl. Typ/Farbe/Kategorie
+- Globale Metadaten, die auch fuer Suche und Matching relevant sind
+
+### ImageUploadPanel
+
+Das `ImageUploadPanel.jsx` ermoeglicht die Zuordnung von Bildern zu Codex-Eintraegen.
+
+- Bietet einen Upload-Flow fuer Bilder (z. B. Cover, Symbole, Charakterportraits)
+- Speichert Bildmetadaten und Referenzen am Codex-Eintrag
+- Kann im Editor/Preview genutzt werden, um visuelle Elemente anzuzeigen
+
+<CodeGroup tabs="Panel-Imports,Panel-Usage">
+
+```tsx
+// Metrantor/StoryMachine-6554/src/pages/Codex/CodexPage.jsx
+
+import { CodexDetailsPanel } from "./CodexDetailsPanel"
+import { AliasesPanel } from "./AliasesPanel"
+import { ExclusionsPanel } from "./ExclusionsPanel"
+import { RelationsPanel } from "./RelationsPanel"
+import { ConditionalEntriesPanel } from "./ConditionalEntriesPanel"
+import { ImageUploadPanel } from "./ImageUploadPanel"
+```
+
+```tsx
+// Ausschnitt der Verwendung in der Detailspalte
+
+export function CodexDetailSection({ entry, editing }) {
+  return (
+    <>
+      <CodexDetailsPanel entry={entry} editing={editing} />
+
+      <section className="codex-tabs">
+        <AliasesPanel entry={entry} editing={editing} />
+        <ExclusionsPanel entry={entry} editing={editing} />
+        <RelationsPanel entry={entry} editing={editing} />
+        <ConditionalEntriesPanel entry={entry} editing={editing} />
+        <ImageUploadPanel entry={entry} editing={editing} />
+      </section>
+    </>
+  )
+}
+```
+
+</CodeGroup>
+
+## Typischer Flow in der Codex-Oberflaeche
+
+Der folgende Ablauf beschreibt einen haeufigen End-to-End-Flow, mit dem Nutzer Codex-Eintraege erstellen und spaeter im Editor verwenden.
+
+<Steps>
+
+<Step title="Serie aktivieren" icon="folder">
+
+- Oeffne eine bestehende Serie oder lege eine neue an.
+- Stelle sicher, dass `activeSeriesId` gesetzt ist, damit der Codex-Link in der Sidebar erscheint.
+- Navigiere ueber die Sidebar zur Route `/codex`.
+
+</Step>
+
+<Step title="Eintrag in der Liste anlegen oder waehlen" icon="plus">
+
+- Nutze links die Suche und Filter, um bestehende Eintraege zu finden.
+- Klicke auf einen Eintrag, um ihn im rechten Detailbereich zu laden.
+- Klicke auf den FiPlus-Button, um einen neuen Eintrag anzulegen; der neue Eintrag wird automatisch ausgewaehlt.
+
+</Step>
+
+<Step title="Eintrag bearbeiten" icon="edit">
+
+- Aktiviere den Bearbeitungsmodus mit dem Button **Bearbeiten**.
+- Fuellen oder aendere Felder im `CodexDetailsPanel` (Titel, Beschreibung, Metadaten).
+- Pflege Aliases im `AliasesPanel`, Ausschluesse im `ExclusionsPanel` und Beziehungen im `RelationsPanel`.
+- Hinterlege bei Bedarf bedingte Informationen im `ConditionalEntriesPanel` und Bilder im `ImageUploadPanel`.
+
+</Step>
+
+<Step title="Aenderungen speichern" icon="check-circle">
+
+- Klicke auf **Speichern**, um alle Aenderungen zu uebernehmen.
+- Der Code validiert Eingaben und aktualisiert den Eintrag fuer die aktuelle `activeSeriesId`.
+- Nach Erfolg wechselt der Detailbereich zur readonly-Ansicht, sodass klar ist, dass der Stand gesichert ist.
+
+</Step>
+
+<Step title="Eintrag loeschen (optional)" icon="trash">
+
+- Wenn ein Eintrag nicht mehr benoetigt wird, klicke auf **Eintrag loeschen**.
+- Bestaetige im Dialog die Frage **Eintrag wirklich loeschen?** mit **Ja, loeschen**, um den Eintrag dauerhaft zu entfernen.
+- Die Liste aktualisiert sich, der geloeschte Eintrag verschwindet und kein Eintrag oder ein naechster Eintrag wird ausgewaehlt.
+
+</Step>
+
+</Steps>
+
+## Technische Aspekte: Highlighting und Matching
+
+Neben der Oberflaeche selbst existieren technische Hilfsfunktionen, die den Codex mit Editor und Preview integrieren.
+
+- **`codexHighlight.jsx`**: Markiert relevante Begriffe im Editor oder in der Vorschau basierend auf den Codex-Eintraegen.
+- **`codexMatcher.js`**: Berechnet, ob und wie Textstellen mit Codex-Eintraegen uebereinstimmen (Matching-Logik).
+
+Beide Komponenten nutzen die in der CodexPage gepflegten Daten, um im Schreibprozess dynamisch auf Begriffe zu reagieren.
+
+<CodeGroup tabs="Highlight,Matcher">
+
+```tsx
+// Metrantor/StoryMachine-6554/src/utils/codexHighlight.jsx
+
+import { matchCodexEntries } from "./codexMatcher"
+
+export function highlightCodexTerms(text, codexEntries) {
+  const matches = matchCodexEntries(text, codexEntries)
+
+  // Gibt eine Struktur zurueck, mit der der Editor Begriffe hervorheben kann
+  return matches.map(match => ({
+    from: match.start,
+    to: match.end,
+    className: "codex-highlight",
+    entryId: match.entryId,
+  }))
+}
+```
+
+```ts
+// Metrantor/StoryMachine-6554/src/utils/codexMatcher.js
+
+export function matchCodexEntries(text, codexEntries) {
+  const lower = text.toLowerCase()
+  const results = []
+
+  for (const entry of codexEntries) {
+    const terms = [entry.title, ...(entry.aliases || [])]
+    for (const term of terms) {
+      const index = lower.indexOf(term.toLowerCase())
+      if (index >= 0) {
+        results.push({
+          entryId: entry.id,
+          start: index,
+          end: index + term.length,
+        })
+      }
+    }
+  }
+
+  return results
+}
+```
+
+</CodeGroup>
+
+Diese Utils sind die Bruecke zwischen dem im Codex gepflegten Wissen und der spaeteren Hervorhebung im Editor.
+
+## Wo im Code?
+
+Die wichtigsten Einstiegspunkte fuer die Codex-Oberflaeche und ihre Hilfsfunktionen sind ueber mehrere Dateien verteilt.
+
+<CodeGroup tabs="Oberflaeche,Store und Utils">
+
+```txt
+// UI und Panels
+
+src/
+  pages/
+    Codex/
+      CodexPage.jsx
+      CodexPageLayout.jsx        // Layout links/rechts (optional, je nach Struktur)
+      CodexActions.jsx
+      DeleteEntryButton.jsx
+      CodexDetailsPanel.jsx
+      AliasesPanel.jsx
+      ExclusionsPanel.jsx
+      RelationsPanel.jsx
+      ConditionalEntriesPanel.jsx
+      ImageUploadPanel.jsx
+```
+
+```txt
+// Store und Codex-Integration
+
+src/
+  context/
+    Store.jsx        // enthaelt activeSeriesId und typischerweise Codex-Status
+
+  utils/
+    codexHighlight.jsx
+    codexMatcher.js
+```
+
+</CodeGroup>
+
+Nutze diese Pfade als Ausgangspunkt, um die Codex-Oberflaeche anzupassen, neue Tabs hinzuzufuegen oder die Matching-Logik fuer Editor und Preview zu erweitern.
