@@ -92,7 +92,16 @@
                   },
                   {
                     "group": "Story Flow",
-                    "pages": []
+                    "pages": [
+                      {
+                        "title": "Story Flow im Kapitel",
+                        "path": "story-flow-im-kapitel"
+                      },
+                      {
+                        "title": "Story Flow (technische Perspektive)",
+                        "path": "story-flow-technisch"
+                      }
+                    ]
                   },
                   {
                     "title": "Überblick",
