@@ -1,0 +1,669 @@
+
+
+---
+
+# Technische Referenz der Supabase-Funktionen
+
+## 1. `get_super_codex_ids(p_base_codex_ids uuid[]) -> uuid[]`
+
+### Zweck
+
+Leitet aus einer vorhandenen Menge normaler Codex-IDs zusätzliche **Super-Codex-IDs** ab.
+
+### Eingabe
+
+- `p_base_codex_ids uuid[]`
+
+### Rückgabe
+
+- `uuid[]` mit den Ziel-IDs der passenden Super-Codex-Regeln
+
+### Verwendete Tabellen
+
+- `public.codex_super_rules`
+
+- `public.codex_super_rule_triggers`
+
+- `public.codex_entries`
+
+### Interne Logik
+
+Die Funktion arbeitet in drei Schritten:
+
+#### `input_ids`
+
+Normalisiert die Eingabe:
+
+- `unnest(...)`
+
+- `distinct`
+
+- `null`-sicher durch `coalesce(..., '{}'::uuid[])`
+
+#### `rule_trigger_counts`
+
+Ermittelt pro aktiver Super-Codex-Regel:
+
+- `super_rule_id`
+
+- `target_entry_id`
+
+- Anzahl der benötigten Trigger (`required_count`)
+
+Es werden nur Regeln berücksichtigt, bei denen:
+
+- `sr.is_active = true`
+
+- `sr.rule_mode = 'all_required'`
+
+- Ziel-Codex-Eintrag aktiv ist
+
+#### `rule_match_counts`
+
+Zählt pro Regel, wie viele Trigger tatsächlich in `p_base_codex_ids` vorkommen.
+
+### Entscheidungslogik
+
+Eine Regel ist erfüllt, wenn:
+
+```typescript
+rmc.matched_count = rtc.required_count
+
+```
+
+Das ist eine reine **UND-Logik**:\
+Alle Trigger müssen vorhanden sein.
+
+### Ergebnis
+
+Die Funktion gibt alle `target_entry_id` zurück, deren Regel vollständig erfüllt ist.
+
+### Fachliche Bedeutung
+
+Diese Funktion erzeugt **abgeleiteten Kontext**, der nicht direkt im Text genannt werden muss.
+
+---
+
+## 2. `remove_super_codex_duplicates(p_base_codex_ids uuid[], p_super_codex_ids uuid[]) -> uuid[]`
+
+### Zweck
+
+Entfernt aus der normalen Codex-Menge alle IDs, die gleichzeitig im Super-Codex vorkommen.
+
+### Eingabe
+
+- `p_base_codex_ids uuid[]`
+
+- `p_super_codex_ids uuid[]`
+
+### Rückgabe
+
+- `uuid[]` mit bereinigten Standard-Codex-IDs
+
+### Interne Logik
+
+Die Funktion arbeitet über zwei normalisierte Mengen:
+
+#### `base_ids`
+
+Alle Basis-IDs, dedupliziert
+
+#### `super_ids`
+
+Alle Super-Codex-IDs, dedupliziert
+
+Danach:
+
+- `left join` von `base_ids` auf `super_ids`
+
+- nur jene Basis-IDs bleiben erhalten, die **nicht** im Super-Codex vorhanden sind
+
+### Entscheidungslogik
+
+```typescript
+where s.id is null
+
+```
+
+### Fachliche Bedeutung
+
+Wenn ein Eintrag sowohl normal als auch als Super-Codex auftaucht, wird er nur noch im **Super-Codex-Bereich** geführt.
+
+### Designentscheidung
+
+Das ist für deine Promptstruktur sinnvoll, weil der Super-Codex semantisch spezieller ist.
+
+---
+
+## 3. `get_matching_codex_ids_from_text(p_series_id text, p_text text) -> uuid[]`
+
+### Zweck
+
+Ermittelt aus einem freien Text die relevanten Codex-IDs einer Serie.
+
+### Eingabe
+
+- `p_series_id text`
+
+- `p_text text`
+
+### Rückgabe
+
+- `uuid[]`
+
+### Verwendete Tabellen
+
+- `public.codex_entries`
+
+- `public.codex_aliases`
+
+- `public.codex_exclusions`
+
+- `public.codex_relations`
+
+### Funktionsphasen
+
+---
+
+### Phase 1: Validierung der Eingaben
+
+Die Funktion bricht sofort ab, wenn:
+
+- `p_series_id` leer ist
+
+- `p_text` leer ist
+
+- `v_text_len <= 0`
+
+In diesen Fällen wird immer ein leeres UUID-Array zurückgegeben.
+
+---
+
+### Phase 2: Suchbegriffe laden
+
+Die Suchbegriffe kommen aus zwei Quellen:
+
+#### A. Hauptnamen
+
+Aus `public.codex_entries`
+
+Voraussetzungen:
+
+- `e.series_id = p_series_id`
+
+- `e.is_active = true`
+
+- `e.track_mentions = true`
+
+- `e.ai_context_mode <> 'never_include'`
+
+- `e.name is not null`
+
+#### B. Aliasse
+
+Aus `public.codex_aliases`
+
+Voraussetzungen:
+
+- Eintrag aktiv
+
+- Alias aktiv
+
+- `track_mentions = true`
+
+- `ai_context_mode <> 'never_include'`
+
+### Normalisierung
+
+Die Begriffe werden bereinigt durch:
+
+- `btrim(raw_term)`
+
+- Reduktion mehrfacher Leerzeichen auf ein einzelnes Leerzeichen
+
+### Deduplizierung
+
+Für jeden Codex-Eintrag wird ein `dedupe_key` gebildet:
+
+- case-sensitive: unverändert
+
+- case-insensitive: `lower(search_term)`
+
+Dann wird pro `(codex_id, dedupe_key, case_sensitive)` nur ein Begriff behalten.
+
+### Sortierung
+
+Die Suchbegriffe werden absteigend nach Länge sortiert:
+
+```typescript
+order by char_length(d.search_term) desc, d.search_term
+
+```
+
+### Bedeutung
+
+Längere und spezifischere Begriffe werden zuerst geprüft.
+
+---
+
+### Phase 3: Matching im Text
+
+Für jeden Suchbegriff wird iterativ im Text gesucht.
+
+#### Case-sensitive / insensitive
+
+- case-sensitive: Suche in `v_text`
+
+- case-insensitive: Suche in `v_text_lower`
+
+#### Wortgrenzenlogik
+
+Ein Match ist nur gültig, wenn links und rechts kein alphanumerisches Zeichen oder `_` direkt anschließt:
+
+```typescript
+(v_before_char is null or v_before_char !~ '[[:alnum:]_]')
+and
+(v_after_char is null or v_after_char !~ '[[:alnum:]_]')
+
+```
+
+#### Überlappungsschutz
+
+Die Funktion verwendet ein `occupied`-Array:
+
+- bereits belegte Zeichenpositionen blockieren spätere Treffer
+
+### Bedeutung
+
+Das Verhalten entspricht inhaltlich dem dokumentierten Frontend-/Matcher-Ansatz:
+
+- längste Treffer zuerst
+
+- keine Wortteil-Treffer
+
+- keine Doppelbelegung durch überlappende Matches
+
+---
+
+### Phase 4: Exclusions für direkte Treffer
+
+Bevor ein direkt gefundener Codex-Eintrag übernommen wird, wird geprüft, ob eine Exclusion-Phrase im Text vorkommt:
+
+```typescript
+lower(v_text) like '%' || coalesce(ex.normalized_excluded_phrase, lower(ex.excluded_phrase)) || '%'
+
+```
+
+Wenn eine Exclusion greift:
+
+- der Eintrag wird **nicht** in `v_direct_ids` aufgenommen
+
+### Bedeutung
+
+Exclusions sperren den gesamten Eintrag bereits auf Matching-Ebene.
+
+---
+
+### Phase 5: Direkte Treffer finalisieren
+
+Alle direkt gültigen Treffer werden in `v_direct_ids` gesammelt und zusätzlich mit ihrer frühesten Startposition in `v_direct_pos` gespeichert.
+
+Danach werden sie sortiert in `v_final_ids` übernommen:
+
+```typescript
+order by v_direct_pos[g.i], g.i
+
+```
+
+### Bedeutung
+
+Die Reihenfolge entspricht dem ersten Auftreten im Text.
+
+---
+
+### Phase 6: Relationen auflösen
+
+Die Funktion zieht danach zusätzlich Relation-Ziele aus `public.codex_relations`:
+
+Voraussetzungen:
+
+- `cr.source_entry_id = any(v_direct_ids)`
+
+- `cr.is_active = true`
+
+- `cr.pull_into_context = true`
+
+- Ziel-Eintrag aktiv
+
+Dann wird auch auf Relation-Ziele nochmals eine Exclusion-Prüfung angewendet.
+
+Wenn keine Exclusion greift:
+
+- Ziel-ID wird an `v_final_ids` angehängt, sofern noch nicht vorhanden
+
+### Wichtige Einschränkung
+
+Diese Relationsauflösung ist **nicht rekursiv**.
+
+Das heißt:
+
+- direkte Treffer → 1-Hop-Ziele
+
+- aber keine Kette wie A → B → C
+
+### Fachliche Bedeutung
+
+Die Funktion liefert:
+
+- direkte Texttreffer
+
+- plus Aliasse
+
+- plus direkte, kontextrelevante Relationseinträge
+
+---
+
+## 4. `get_prompt_codex_payload_for_beat(p_codex_entry_ids uuid[], p_beat_id uuid) -> jsonb`
+
+### Zweck
+
+Erzeugt aus einer Liste von Codex-IDs und einem Beat einen Prompt-Payload.
+
+### Eingabe
+
+- `p_codex_entry_ids uuid[]`
+
+- `p_beat_id uuid`
+
+### Rückgabe
+
+- `jsonb`-Array
+
+### Interne Logik
+
+#### `input_ids`
+
+Die übergebenen Codex-IDs werden mit `unnest(...)` in Zeilenform gebracht.
+
+#### `matched_details`
+
+Ruft auf:
+
+```typescript
+public.get_matching_codex_details_for_beat(
+  p_codex_entry_ids,
+  p_beat_id
+)
+
+```
+
+#### `grouped_details`
+
+Gruppiert alle gefundenen Details pro Codex-Eintrag und aggregiert deren Texte in `jsonb_agg(...)`.
+
+#### `final_rows`
+
+Verknüpft die Input-IDs mit `public.codex_entries` und hängt die gruppierten Details per `left join` an.
+
+### Wichtiger Punkt
+
+Die Funktion wurde so gebaut, dass **alle übergebenen Codex-Einträge** zurückkommen, auch wenn keine Details matchen.
+
+Dann gilt:
+
+```typescript
+"codex_details": []
+
+```
+
+### Rückgabeformat
+
+Pro Eintrag:
+
+- `codex_title`
+
+- `codex_text`
+
+- `codex_details`
+
+### Fachliche Bedeutung
+
+Der Haupteintrag geht nie verloren, nur weil gerade kein Detaileintrag passt.
+
+---
+
+## 5. `get_matching_codex_details_for_beat(p_codex_entry_ids uuid[], p_beat_id uuid)`
+
+### Zweck
+
+Ermittelt die gültigen Detaileinträge für eine Menge von Codex-Einträgen im Kontext eines konkreten Beats.
+
+### Eingabe
+
+- `p_codex_entry_ids uuid[]`
+
+- `p_beat_id uuid`
+
+### Rückgabe
+
+Tabellarisch:
+
+- `conditional_entry_id`
+
+- `codex_entry_id`
+
+- `title`
+
+- `codex_text`
+
+- `note`
+
+- `sort_order`
+
+- `condition_mode`
+
+- `requires_pov_character_id`
+
+- `valid_from`
+
+- `valid_to`
+
+---
+
+### Interne Funktionsphasen
+
+#### A. Beat-Kontext laden (`target`)
+
+Ermittelt:
+
+- `series_id`
+
+- `beat_id`
+
+- `pov_character_entry_id`
+
+- `effective_at`
+
+- `beat_text_normalized`
+
+Dafür werden verknüpft:
+
+- `beats`
+
+- `scenes`
+
+- `chapters`
+
+- `novels`
+
+- `series`
+
+---
+
+#### B. Seed-Einträge bilden
+
+Aus den übergebenen Codex-IDs werden nur aktive Einträge übernommen.
+
+---
+
+#### C. Seed-Exclusions prüfen
+
+Wenn der Beat-Text eine Exclusion eines Seed-Eintrags enthält, wird dieser Seed-Eintrag ausgeschlossen.
+
+---
+
+#### D. Relation Tree aufbauen
+
+Die Funktion baut **rekursiv** einen Relation Tree über `codex_relations` auf.
+
+Voraussetzungen:
+
+- Relation aktiv
+
+- `pull_into_context = true`
+
+- Ziel-Eintrag aktiv
+
+- Zyklen werden über `path` verhindert
+
+### Unterschied zu `get_matching_codex_ids_from_text`
+
+Hier sind die Relationen **rekursiv**, dort nur 1-Hop.
+
+---
+
+#### E. Kandidaten-Exclusions rekursiv ausschließen
+
+Wenn ein Kandidat eine Exclusion im Beat-Text hat, wird er plus seine relationell nachgezogenen Zielknoten über `excluded_relation_tree` entfernt.
+
+---
+
+#### F. Story-State laden
+
+Die Funktion zieht den Story-State des Beats über:
+
+```typescript
+public.get_story_state_at_beat(p_beat_id, 'gross')
+
+```
+
+---
+
+#### G. Candidate Entries filtern
+
+Aus `public.codex_conditional_entries` werden nur jene Detaileinträge genommen, die:
+
+- aktiv sind
+
+- zu den finalen Codex-IDs gehören
+
+- zur Serie des Beats gehören
+
+- ggf. POV-Anforderungen erfüllen
+
+- im Zeitfenster gültig sind
+
+---
+
+#### H. Bedingungen auswerten
+
+Für jeden bedingten Detaileintrag werden die Variablenbedingungen geladen:
+
+- `codex_conditional_entry_variable_conditions`
+
+- `story_variables`
+
+- aktueller Story-State
+
+Dann wird für jede Bedingung ausgewertet:
+
+```typescript
+public.evaluate_story_variable_condition(...)
+
+```
+
+---
+
+#### I. Condition Summary bilden
+
+Pro `conditional_entry_id` werden berechnet:
+
+- `total_conditions`
+
+- `all_conditions_match`
+
+- `any_condition_match`
+
+Dabei wird unterschieden zwischen:
+
+- `condition_mode = 'all'`
+
+- `condition_mode = 'any'`
+
+---
+
+#### J. Gültige Entries bestimmen
+
+Ein Detaileintrag ist gültig, wenn:
+
+- er **keine Bedingungen** hat
+
+- oder bei `all` alle Bedingungen erfüllt sind
+
+- oder bei `any` mindestens eine Bedingung erfüllt ist
+
+---
+
+### Fachliche Bedeutung
+
+Die Funktion ist der eigentliche regelbasierte Filter für beat-spezifische Codex-Details.
+
+---
+
+# Was für die Gesamtdokumentation jetzt noch fehlt
+
+Mit dem, was du mir jetzt gegeben hast, kann ich den Großteil bereits präzise dokumentieren.
+
+Für eine wirklich vollständige Referenz mit allen SQL-Signaturen fehlt mir jetzt im Grunde nur noch der exakte Body von:
+
+- `evaluate_story_variable_condition(...)`
+
+Den haben wir zwar gemeinsam entwickelt und ich kenne die Logik grob:
+
+- `boolean`
+
+- `integer`
+
+- `numeric`
+
+- `text`
+
+- `enum`
+
+- `json`
+
+- inklusive `like` / `not like` mit case-insensitiver Textbehandlung
+
+Aber wenn du willst, dass ich daraus ein **wirklich vollständiges technisches Markdown-Dokument** mache, wäre diese Funktion noch der letzte saubere Baustein.
+
+## Was ich dir jetzt anbieten würde
+
+Ich kann dir im nächsten Schritt direkt ein vollständiges, sauber gegliedertes **Markdown-Architekturdokument** schreiben mit:
+
+- Systemübersicht
+
+- n8n-Workflow
+
+- Datenfluss
+
+- Funktionsreferenz
+
+- SQL-Funktionsübersicht
+
+- Designentscheidungen
+
+- Risiken
+
+- Erweiterungspunkte
+
+Wenn du magst, schick mir noch `evaluate_story_variable_condition(...)`, dann ist das Paket wirklich rund.

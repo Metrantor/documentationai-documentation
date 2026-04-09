@@ -1,0 +1,243 @@
+create or replace function public.build_full_codex_context_json(
+  p_beat_id uuid,
+  p_text text
+)
+returns jsonb
+language plpgsql
+stable
+as $function$
+declare
+  v_series_text text;
+  v_chapter_id uuid;
+  v_result jsonb;
+begin
+  /*
+    Beat-Kontext laden:
+    - Serie
+    - Kapitel
+  */
+  select
+    n.series_id::text,
+    ch.id
+  into
+    v_series_text,
+    v_chapter_id
+  from public.beats b
+  join public.scenes s
+    on s.id = b.scene_id
+  join public.chapters ch
+    on ch.id = s.chapter_id
+  join public.novels n
+    on n.id = ch.novel_id
+  where b.id = p_beat_id;
+
+  if not found then
+    raise exception 'Beat % wurde nicht gefunden', p_beat_id;
+  end if;
+
+  with params as (
+    select
+      coalesce(p_text, '') as raw_text,
+      lower(coalesce(p_text, '')) as text_lower
+  ),
+
+  /*
+    1) Standard-Basis aus Text
+  */
+  standard_base as (
+    select coalesce(
+      public.get_matching_codex_ids_from_text(v_series_text, coalesce(p_text, '')),
+      '{}'::uuid[]
+    ) as ids
+  ),
+
+  /*
+    2) Super-Codex
+  */
+  super_raw as (
+    select coalesce(
+      public.get_super_codex_ids((select ids from standard_base)),
+      '{}'::uuid[]
+    ) as ids
+  ),
+
+  /*
+    3) Super-Codex um Exclusions bereinigen
+  */
+  super_filtered as (
+    with super_input as (
+      select distinct unnest((select ids from super_raw)) as codex_id
+    )
+    select coalesce(
+      array(
+        select si.codex_id
+        from super_input si
+        join public.codex_entries ce
+          on ce.id = si.codex_id
+        cross join params p
+        where ce.is_active = true
+          and not exists (
+            select 1
+            from public.codex_exclusions ex
+            where ex.entry_id = si.codex_id
+              and p.text_lower like '%' || coalesce(ex.normalized_excluded_phrase, lower(ex.excluded_phrase)) || '%'
+          )
+        order by si.codex_id
+      ),
+      '{}'::uuid[]
+    ) as ids
+  ),
+
+  /*
+    4) Standard-Codex um Super-Dubletten bereinigen
+  */
+  standard_final as (
+    select coalesce(
+      public.remove_super_codex_duplicates(
+        (select ids from standard_base),
+        (select ids from super_filtered)
+      ),
+      '{}'::uuid[]
+    ) as ids
+  ),
+
+  /*
+    5) Chapter-Codex
+  */
+  chapter_base as (
+    select coalesce(
+      array(
+        select distinct ce.id
+        from public.chapter_codex_entries cce
+        join public.codex_entries ce
+          on ce.id = cce.codex_entry_id
+        cross join params p
+        where cce.chapter_id = v_chapter_id
+          and ce.is_active = true
+          and not exists (
+            select 1
+            from public.codex_exclusions ex
+            where ex.entry_id = ce.id
+              and p.text_lower like '%' || coalesce(ex.normalized_excluded_phrase, lower(ex.excluded_phrase)) || '%'
+          )
+        order by ce.id
+      ),
+      '{}'::uuid[]
+    ) as ids
+  ),
+
+  chapter_final as (
+    select coalesce(
+      public.remove_super_codex_duplicates(
+        (select ids from chapter_base),
+        (select ids from super_filtered)
+      ),
+      '{}'::uuid[]
+    ) as ids
+  ),
+
+  /*
+    6) World-Codex
+  */
+  world_base as (
+    select coalesce(
+      array(
+        select distinct ce.id
+        from public.codex_entries ce
+        cross join params p
+        where ce.series_id = v_series_text
+          and ce.is_active = true
+          and ce.always_include = true
+          and not exists (
+            select 1
+            from public.codex_exclusions ex
+            where ex.entry_id = ce.id
+              and p.text_lower like '%' || coalesce(ex.normalized_excluded_phrase, lower(ex.excluded_phrase)) || '%'
+          )
+        order by ce.id
+      ),
+      '{}'::uuid[]
+    ) as ids
+  ),
+
+  world_final as (
+    select coalesce(
+      public.remove_super_codex_duplicates(
+        (select ids from world_base),
+        (select ids from super_filtered)
+      ),
+      '{}'::uuid[]
+    ) as ids
+  ),
+
+  /*
+    7) Payloads
+  */
+  standard_payload as (
+    select coalesce(
+      public.get_prompt_codex_payload_for_beat(
+        (select ids from standard_final),
+        p_beat_id
+      ),
+      '[]'::jsonb
+    ) as payload
+  ),
+  super_payload as (
+    select coalesce(
+      public.get_prompt_codex_payload_for_beat(
+        (select ids from super_filtered),
+        p_beat_id
+      ),
+      '[]'::jsonb
+    ) as payload
+  ),
+  chapter_payload as (
+    select coalesce(
+      public.get_prompt_codex_payload_for_beat(
+        (select ids from chapter_final),
+        p_beat_id
+      ),
+      '[]'::jsonb
+    ) as payload
+  ),
+  world_payload as (
+    select coalesce(
+      public.get_prompt_codex_payload_for_beat(
+        (select ids from world_final),
+        p_beat_id
+      ),
+      '[]'::jsonb
+    ) as payload
+  )
+
+  select jsonb_build_object(
+    'input', jsonb_build_object(
+      'series_id', v_series_text,
+      'beat_id', p_beat_id,
+      'chapter_id', v_chapter_id,
+      'text', coalesce(p_text, '')
+    ),
+    'ids', jsonb_build_object(
+      'standard_codex_ids', to_jsonb((select ids from standard_final)),
+      'super_codex_ids', to_jsonb((select ids from super_filtered)),
+      'chapter_codex_ids', to_jsonb((select ids from chapter_final)),
+      'world_codex_ids', to_jsonb((select ids from world_final))
+    ),
+    'payloads', jsonb_build_object(
+      'standard_codex', (select payload from standard_payload),
+      'super_codex', (select payload from super_payload),
+      'chapter_codex', (select payload from chapter_payload),
+      'world_codex', (select payload from world_payload)
+    ),
+    'rendered', jsonb_build_object(
+      'standard_codex', public.render_codex_payload((select payload from standard_payload), 'codex'),
+      'super_codex', public.render_codex_payload((select payload from super_payload), 'super codex'),
+      'chapter_codex', public.render_codex_payload((select payload from chapter_payload), 'chapter codex'),
+      'world_codex', public.render_codex_payload((select payload from world_payload), 'world codex')
+    )
+  )
+  into v_result;
+
+  return v_result;
+end;
+$function$;

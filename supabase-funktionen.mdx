@@ -1,0 +1,1279 @@
+---
+title: SupaBase Funktion für Codex Management I/II
+description: >-
+  In diesem Bereich werden die wichtigsten Funktionen für das Zusammenstellen
+  eines Codecs, insbesondere Standard-Codecs aus dem markierten Text oder einem
+  Beat heraus und Super-Codecs, beschrieben. Das heißt, hier werden die
+  Funktionen beschrieben, die in N8n benutzt werden und die in Superbase
+  definiert sind.
+---
+```markdown
+
+with input_ids as (
+  select distinct unnest(coalesce(p_base_codex_ids, '{}'::uuid[])) as codex_id
+),
+rule_trigger_counts as (
+  select
+    sr.id as super_rule_id,
+    sr.target_entry_id,
+    count(*) as required_count
+  from public.codex_super_rules sr
+  join public.codex_super_rule_triggers srt
+    on srt.super_rule_id = sr.id
+  join public.codex_entries target_ce
+    on target_ce.id = sr.target_entry_id
+  where sr.is_active = true
+    and sr.rule_mode = 'all_required'
+    and target_ce.is_active = true
+  group by sr.id, sr.target_entry_id
+),
+rule_match_counts as (
+  select
+    sr.id as super_rule_id,
+    sr.target_entry_id,
+    count(distinct srt.trigger_entry_id) as matched_count
+  from public.codex_super_rules sr
+  join public.codex_super_rule_triggers srt
+    on srt.super_rule_id = sr.id
+  join input_ids i
+    on i.codex_id = srt.trigger_entry_id
+  where sr.is_active = true
+    and sr.rule_mode = 'all_required'
+  group by sr.id, sr.target_entry_id
+)
+select coalesce(
+  array(
+    select distinct rtc.target_entry_id
+    from rule_trigger_counts rtc
+    join rule_match_counts rmc
+      on rmc.super_rule_id = rtc.super_rule_id
+    where rmc.matched_count = rtc.required_count
+    order by rtc.target_entry_id
+  ),
+  '{}'::uuid[]
+);
+
+
+with base_ids as (
+  select distinct unnest(coalesce(p_base_codex_ids, '{}'::uuid[])) as id
+),
+super_ids as (
+  select distinct unnest(coalesce(p_super_codex_ids, '{}'::uuid[])) as id
+)
+select coalesce(
+  array(
+    select b.id
+    from base_ids b
+    left join super_ids s
+      on s.id = b.id
+    where s.id is null
+    order by b.id
+  ),
+  '{}'::uuid[]
+);
+
+
+declare
+  r record;
+  rel record;
+
+  v_text text;
+  v_text_lower text;
+  v_text_len int;
+
+  v_search_term text;
+  v_search_term_cmp text;
+  v_term_len int;
+
+  v_search_from int;
+  v_rel_pos int;
+  v_start_pos int;
+  v_end_pos int;
+
+  v_before_char text;
+  v_after_char text;
+
+  v_boundary_ok boolean;
+  v_overlaps boolean;
+  v_is_excluded boolean;
+
+  v_occupied int[];
+
+  v_direct_ids uuid[] := '{}'::uuid[];
+  v_direct_pos int[] := '{}'::int[];
+
+  v_final_ids uuid[] := '{}'::uuid[];
+
+  i int;
+  idx int;
+begin
+  if p_series_id is null or btrim(p_series_id) = '' then
+    return '{}'::uuid[];
+  end if;
+
+  if p_text is null or btrim(p_text) = '' then
+    return '{}'::uuid[];
+  end if;
+
+  v_text := p_text;
+  v_text_lower := lower(v_text);
+  v_text_len := char_length(v_text);
+
+  if v_text_len <= 0 then
+    return '{}'::uuid[];
+  end if;
+
+  v_occupied := array_fill(0, array[v_text_len]);
+
+  /*
+    1) Suchbegriffe laden:
+       - Namen
+       - Aliase
+       - nur aktive Einträge/Aliase
+       - nur dieser Serie
+       - Dubletten bereinigen
+       - längere Begriffe zuerst
+  */
+  for r in
+    with raw_terms as (
+      select
+        e.id as codex_id,
+        e.case_sensitive,
+        e.name as raw_term
+      from public.codex_entries e
+      where e.series_id = p_series_id
+        and e.is_active = true
+        and e.track_mentions = true
+        and e.ai_context_mode <> 'never_include'
+        and e.name is not null
+
+      union all
+
+      select
+        e.id as codex_id,
+        e.case_sensitive,
+        a.alias as raw_term
+      from public.codex_entries e
+      join public.codex_aliases a
+        on a.entry_id = e.id
+      where e.series_id = p_series_id
+        and e.is_active = true
+        and e.track_mentions = true
+        and e.ai_context_mode <> 'never_include'
+        and a.is_active = true
+        and a.alias is not null
+    ),
+    normalized_terms as (
+      select
+        codex_id,
+        case_sensitive,
+        regexp_replace(btrim(raw_term), '\s+', ' ', 'g') as search_term
+      from raw_terms
+    ),
+    filtered_terms as (
+      select
+        codex_id,
+        search_term,
+        case_sensitive,
+        case
+          when case_sensitive then search_term
+          else lower(search_term)
+        end as dedupe_key
+      from normalized_terms
+      where search_term <> ''
+    ),
+    deduped_terms as (
+      select distinct on (codex_id, dedupe_key, case_sensitive)
+        codex_id,
+        search_term,
+        case_sensitive
+      from filtered_terms
+      order by
+        codex_id,
+        dedupe_key,
+        case_sensitive,
+        char_length(search_term) desc,
+        search_term
+    )
+    select
+      d.codex_id,
+      d.search_term,
+      d.case_sensitive
+    from deduped_terms d
+    order by char_length(d.search_term) desc, d.search_term
+  loop
+    v_search_term := r.search_term;
+    v_term_len := char_length(v_search_term);
+
+    if v_term_len <= 0 then
+      continue;
+    end if;
+
+    if r.case_sensitive then
+      v_search_term_cmp := v_search_term;
+    else
+      v_search_term_cmp := lower(v_search_term);
+    end if;
+
+    v_search_from := 1;
+
+    loop
+      exit when v_search_from > v_text_len;
+
+      if r.case_sensitive then
+        v_rel_pos := strpos(substr(v_text, v_search_from), v_search_term_cmp);
+      else
+        v_rel_pos := strpos(substr(v_text_lower, v_search_from), v_search_term_cmp);
+      end if;
+
+      exit when v_rel_pos = 0;
+
+      v_start_pos := v_search_from + v_rel_pos - 1;
+      v_end_pos := v_start_pos + v_term_len - 1;
+
+      if v_start_pos > 1 then
+        v_before_char := substr(v_text, v_start_pos - 1, 1);
+      else
+        v_before_char := null;
+      end if;
+
+      if v_end_pos < v_text_len then
+        v_after_char := substr(v_text, v_end_pos + 1, 1);
+      else
+        v_after_char := null;
+      end if;
+
+      v_boundary_ok :=
+        (v_before_char is null or v_before_char !~ '[[:alnum:]_]')
+        and
+        (v_after_char is null or v_after_char !~ '[[:alnum:]_]');
+
+      if v_boundary_ok then
+        v_overlaps := false;
+
+        for i in v_start_pos..v_end_pos loop
+          if v_occupied[i] = 1 then
+            v_overlaps := true;
+            exit;
+          end if;
+        end loop;
+
+        if not v_overlaps then
+          /*
+            Exclusions für diesen direkt gefundenen Codex prüfen.
+            Wenn irgendeine Exclusion-Phrase im Text vorkommt,
+            wird der gesamte Eintrag NICHT aufgenommen.
+          */
+          select exists (
+            select 1
+            from public.codex_exclusions ex
+            where ex.entry_id = r.codex_id
+              and lower(v_text) like '%' || coalesce(ex.normalized_excluded_phrase, lower(ex.excluded_phrase)) || '%'
+          )
+          into v_is_excluded;
+
+          if not coalesce(v_is_excluded, false) then
+            for i in v_start_pos..v_end_pos loop
+              v_occupied[i] := 1;
+            end loop;
+
+            idx := array_position(v_direct_ids, r.codex_id);
+
+            if idx is null then
+              v_direct_ids := array_append(v_direct_ids, r.codex_id);
+              v_direct_pos := array_append(v_direct_pos, v_start_pos);
+            elsif v_start_pos < v_direct_pos[idx] then
+              v_direct_pos[idx] := v_start_pos;
+            end if;
+          end if;
+        end if;
+      end if;
+
+      v_search_from := v_start_pos + 1;
+    end loop;
+  end loop;
+
+  /*
+    2) Direkte Treffer in Reihenfolge ihres ersten Auftretens übernehmen
+  */
+  if coalesce(array_length(v_direct_ids, 1), 0) > 0 then
+    v_final_ids := array(
+      select v_direct_ids[g.i]
+      from generate_subscripts(v_direct_ids, 1) as g(i)
+      order by v_direct_pos[g.i], g.i
+    );
+  end if;
+
+  /*
+    3) Relations dazuziehen:
+       target_entry_id für alle direkt gematchten source_entry_id
+       - nur aktive Relations
+       - nur pull_into_context = true
+       - Ziel-Eintrag muss aktiv sein
+       - Ziel-Eintrag darf KEINE Exclusion im Text treffen
+  */
+  if coalesce(array_length(v_direct_ids, 1), 0) > 0 then
+    for rel in
+      select distinct
+        cr.target_entry_id
+      from public.codex_relations cr
+      join public.codex_entries ce_target
+        on ce_target.id = cr.target_entry_id
+      where cr.source_entry_id = any(v_direct_ids)
+        and cr.is_active = true
+        and cr.pull_into_context = true
+        and ce_target.is_active = true
+    loop
+      /*
+        Exclusions auch auf Relation-Ziele anwenden
+      */
+      select exists (
+        select 1
+        from public.codex_exclusions ex
+        where ex.entry_id = rel.target_entry_id
+          and lower(v_text) like '%' || coalesce(ex.normalized_excluded_phrase, lower(ex.excluded_phrase)) || '%'
+      )
+      into v_is_excluded;
+
+      if not coalesce(v_is_excluded, false) then
+        if array_position(v_final_ids, rel.target_entry_id) is null then
+          v_final_ids := array_append(v_final_ids, rel.target_entry_id);
+        end if;
+      end if;
+    end loop;
+  end if;
+
+  return coalesce(v_final_ids, '{}'::uuid[]);
+end;
+
+declare
+  r record;
+  rel record;
+
+  v_text text;
+  v_text_lower text;
+  v_text_len int;
+
+  v_search_term text;
+  v_search_term_cmp text;
+  v_term_len int;
+
+  v_search_from int;
+  v_rel_pos int;
+  v_start_pos int;
+  v_end_pos int;
+
+  v_before_char text;
+  v_after_char text;
+
+  v_boundary_ok boolean;
+  v_overlaps boolean;
+  v_is_excluded boolean;
+
+  v_occupied int[];
+
+  v_direct_ids uuid[] := '{}'::uuid[];
+  v_direct_pos int[] := '{}'::int[];
+
+  v_final_ids uuid[] := '{}'::uuid[];
+
+  i int;
+  idx int;
+begin
+  if p_series_id is null or btrim(p_series_id) = '' then
+    return '{}'::uuid[];
+  end if;
+
+  if p_text is null or btrim(p_text) = '' then
+    return '{}'::uuid[];
+  end if;
+
+  v_text := p_text;
+  v_text_lower := lower(v_text);
+  v_text_len := char_length(v_text);
+
+  if v_text_len <= 0 then
+    return '{}'::uuid[];
+  end if;
+
+  v_occupied := array_fill(0, array[v_text_len]);
+
+  /*
+    1) Suchbegriffe laden:
+       - Namen
+       - Aliase
+       - nur aktive Einträge/Aliase
+       - nur dieser Serie
+       - Dubletten bereinigen
+       - längere Begriffe zuerst
+  */
+  for r in
+    with raw_terms as (
+      select
+        e.id as codex_id,
+        e.case_sensitive,
+        e.name as raw_term
+      from public.codex_entries e
+      where e.series_id = p_series_id
+        and e.is_active = true
+        and e.track_mentions = true
+        and e.ai_context_mode <> 'never_include'
+        and e.name is not null
+
+      union all
+
+      select
+        e.id as codex_id,
+        e.case_sensitive,
+        a.alias as raw_term
+      from public.codex_entries e
+      join public.codex_aliases a
+        on a.entry_id = e.id
+      where e.series_id = p_series_id
+        and e.is_active = true
+        and e.track_mentions = true
+        and e.ai_context_mode <> 'never_include'
+        and a.is_active = true
+        and a.alias is not null
+    ),
+    normalized_terms as (
+      select
+        codex_id,
+        case_sensitive,
+        regexp_replace(btrim(raw_term), '\s+', ' ', 'g') as search_term
+      from raw_terms
+    ),
+    filtered_terms as (
+      select
+        codex_id,
+        search_term,
+        case_sensitive,
+        case
+          when case_sensitive then search_term
+          else lower(search_term)
+        end as dedupe_key
+      from normalized_terms
+      where search_term <> ''
+    ),
+    deduped_terms as (
+      select distinct on (codex_id, dedupe_key, case_sensitive)
+        codex_id,
+        search_term,
+        case_sensitive
+      from filtered_terms
+      order by
+        codex_id,
+        dedupe_key,
+        case_sensitive,
+        char_length(search_term) desc,
+        search_term
+    )
+    select
+      d.codex_id,
+      d.search_term,
+      d.case_sensitive
+    from deduped_terms d
+    order by char_length(d.search_term) desc, d.search_term
+  loop
+    v_search_term := r.search_term;
+    v_term_len := char_length(v_search_term);
+
+    if v_term_len <= 0 then
+      continue;
+    end if;
+
+    if r.case_sensitive then
+      v_search_term_cmp := v_search_term;
+    else
+      v_search_term_cmp := lower(v_search_term);
+    end if;
+
+    v_search_from := 1;
+
+    loop
+      exit when v_search_from > v_text_len;
+
+      if r.case_sensitive then
+        v_rel_pos := strpos(substr(v_text, v_search_from), v_search_term_cmp);
+      else
+        v_rel_pos := strpos(substr(v_text_lower, v_search_from), v_search_term_cmp);
+      end if;
+
+      exit when v_rel_pos = 0;
+
+      v_start_pos := v_search_from + v_rel_pos - 1;
+      v_end_pos := v_start_pos + v_term_len - 1;
+
+      if v_start_pos > 1 then
+        v_before_char := substr(v_text, v_start_pos - 1, 1);
+      else
+        v_before_char := null;
+      end if;
+
+      if v_end_pos < v_text_len then
+        v_after_char := substr(v_text, v_end_pos + 1, 1);
+      else
+        v_after_char := null;
+      end if;
+
+      v_boundary_ok :=
+        (v_before_char is null or v_before_char !~ '[[:alnum:]_]')
+        and
+        (v_after_char is null or v_after_char !~ '[[:alnum:]_]');
+
+      if v_boundary_ok then
+        v_overlaps := false;
+
+        for i in v_start_pos..v_end_pos loop
+          if v_occupied[i] = 1 then
+            v_overlaps := true;
+            exit;
+          end if;
+        end loop;
+
+        if not v_overlaps then
+          /*
+            Exclusions für diesen direkt gefundenen Codex prüfen.
+            Wenn irgendeine Exclusion-Phrase im Text vorkommt,
+            wird der gesamte Eintrag NICHT aufgenommen.
+          */
+          select exists (
+            select 1
+            from public.codex_exclusions ex
+            where ex.entry_id = r.codex_id
+              and lower(v_text) like '%' || coalesce(ex.normalized_excluded_phrase, lower(ex.excluded_phrase)) || '%'
+          )
+          into v_is_excluded;
+
+          if not coalesce(v_is_excluded, false) then
+            for i in v_start_pos..v_end_pos loop
+              v_occupied[i] := 1;
+            end loop;
+
+            idx := array_position(v_direct_ids, r.codex_id);
+
+            if idx is null then
+              v_direct_ids := array_append(v_direct_ids, r.codex_id);
+              v_direct_pos := array_append(v_direct_pos, v_start_pos);
+            elsif v_start_pos < v_direct_pos[idx] then
+              v_direct_pos[idx] := v_start_pos;
+            end if;
+          end if;
+        end if;
+      end if;
+
+      v_search_from := v_start_pos + 1;
+    end loop;
+  end loop;
+
+  /*
+    2) Direkte Treffer in Reihenfolge ihres ersten Auftretens übernehmen
+  */
+  if coalesce(array_length(v_direct_ids, 1), 0) > 0 then
+    v_final_ids := array(
+      select v_direct_ids[g.i]
+      from generate_subscripts(v_direct_ids, 1) as g(i)
+      order by v_direct_pos[g.i], g.i
+    );
+  end if;
+
+  /*
+    3) Relations dazuziehen:
+       target_entry_id für alle direkt gematchten source_entry_id
+       - nur aktive Relations
+       - nur pull_into_context = true
+       - Ziel-Eintrag muss aktiv sein
+       - Ziel-Eintrag darf KEINE Exclusion im Text treffen
+  */
+  if coalesce(array_length(v_direct_ids, 1), 0) > 0 then
+    for rel in
+      select distinct
+        cr.target_entry_id
+      from public.codex_relations cr
+      join public.codex_entries ce_target
+        on ce_target.id = cr.target_entry_id
+      where cr.source_entry_id = any(v_direct_ids)
+        and cr.is_active = true
+        and cr.pull_into_context = true
+        and ce_target.is_active = true
+    loop
+      /*
+        Exclusions auch auf Relation-Ziele anwenden
+      */
+      select exists (
+        select 1
+        from public.codex_exclusions ex
+        where ex.entry_id = rel.target_entry_id
+          and lower(v_text) like '%' || coalesce(ex.normalized_excluded_phrase, lower(ex.excluded_phrase)) || '%'
+      )
+      into v_is_excluded;
+
+      if not coalesce(v_is_excluded, false) then
+        if array_position(v_final_ids, rel.target_entry_id) is null then
+          v_final_ids := array_append(v_final_ids, rel.target_entry_id);
+        end if;
+      end if;
+    end loop;
+  end if;
+
+  return coalesce(v_final_ids, '{}'::uuid[]);
+end;
+
+
+declare
+  r record;
+  rel record;
+
+  v_text text;
+  v_text_lower text;
+  v_text_len int;
+
+  v_search_term text;
+  v_search_term_cmp text;
+  v_term_len int;
+
+  v_search_from int;
+  v_rel_pos int;
+  v_start_pos int;
+  v_end_pos int;
+
+  v_before_char text;
+  v_after_char text;
+
+  v_boundary_ok boolean;
+  v_overlaps boolean;
+  v_is_excluded boolean;
+
+  v_occupied int[];
+
+  v_direct_ids uuid[] := '{}'::uuid[];
+  v_direct_pos int[] := '{}'::int[];
+
+  v_final_ids uuid[] := '{}'::uuid[];
+
+  i int;
+  idx int;
+begin
+  if p_series_id is null or btrim(p_series_id) = '' then
+    return '{}'::uuid[];
+  end if;
+
+  if p_text is null or btrim(p_text) = '' then
+    return '{}'::uuid[];
+  end if;
+
+  v_text := p_text;
+  v_text_lower := lower(v_text);
+  v_text_len := char_length(v_text);
+
+  if v_text_len <= 0 then
+    return '{}'::uuid[];
+  end if;
+
+  v_occupied := array_fill(0, array[v_text_len]);
+
+  /*
+    1) Suchbegriffe laden:
+       - Namen
+       - Aliase
+       - nur aktive Einträge/Aliase
+       - nur dieser Serie
+       - Dubletten bereinigen
+       - längere Begriffe zuerst
+  */
+  for r in
+    with raw_terms as (
+      select
+        e.id as codex_id,
+        e.case_sensitive,
+        e.name as raw_term
+      from public.codex_entries e
+      where e.series_id = p_series_id
+        and e.is_active = true
+        and e.track_mentions = true
+        and e.ai_context_mode <> 'never_include'
+        and e.name is not null
+
+      union all
+
+      select
+        e.id as codex_id,
+        e.case_sensitive,
+        a.alias as raw_term
+      from public.codex_entries e
+      join public.codex_aliases a
+        on a.entry_id = e.id
+      where e.series_id = p_series_id
+        and e.is_active = true
+        and e.track_mentions = true
+        and e.ai_context_mode <> 'never_include'
+        and a.is_active = true
+        and a.alias is not null
+    ),
+    normalized_terms as (
+      select
+        codex_id,
+        case_sensitive,
+        regexp_replace(btrim(raw_term), '\s+', ' ', 'g') as search_term
+      from raw_terms
+    ),
+    filtered_terms as (
+      select
+        codex_id,
+        search_term,
+        case_sensitive,
+        case
+          when case_sensitive then search_term
+          else lower(search_term)
+        end as dedupe_key
+      from normalized_terms
+      where search_term <> ''
+    ),
+    deduped_terms as (
+      select distinct on (codex_id, dedupe_key, case_sensitive)
+        codex_id,
+        search_term,
+        case_sensitive
+      from filtered_terms
+      order by
+        codex_id,
+        dedupe_key,
+        case_sensitive,
+        char_length(search_term) desc,
+        search_term
+    )
+    select
+      d.codex_id,
+      d.search_term,
+      d.case_sensitive
+    from deduped_terms d
+    order by char_length(d.search_term) desc, d.search_term
+  loop
+    v_search_term := r.search_term;
+    v_term_len := char_length(v_search_term);
+
+    if v_term_len <= 0 then
+      continue;
+    end if;
+
+    if r.case_sensitive then
+      v_search_term_cmp := v_search_term;
+    else
+      v_search_term_cmp := lower(v_search_term);
+    end if;
+
+    v_search_from := 1;
+
+    loop
+      exit when v_search_from > v_text_len;
+
+      if r.case_sensitive then
+        v_rel_pos := strpos(substr(v_text, v_search_from), v_search_term_cmp);
+      else
+        v_rel_pos := strpos(substr(v_text_lower, v_search_from), v_search_term_cmp);
+      end if;
+
+      exit when v_rel_pos = 0;
+
+      v_start_pos := v_search_from + v_rel_pos - 1;
+      v_end_pos := v_start_pos + v_term_len - 1;
+
+      if v_start_pos > 1 then
+        v_before_char := substr(v_text, v_start_pos - 1, 1);
+      else
+        v_before_char := null;
+      end if;
+
+      if v_end_pos < v_text_len then
+        v_after_char := substr(v_text, v_end_pos + 1, 1);
+      else
+        v_after_char := null;
+      end if;
+
+      v_boundary_ok :=
+        (v_before_char is null or v_before_char !~ '[[:alnum:]_]')
+        and
+        (v_after_char is null or v_after_char !~ '[[:alnum:]_]');
+
+      if v_boundary_ok then
+        v_overlaps := false;
+
+        for i in v_start_pos..v_end_pos loop
+          if v_occupied[i] = 1 then
+            v_overlaps := true;
+            exit;
+          end if;
+        end loop;
+
+        if not v_overlaps then
+          /*
+            Exclusions für diesen direkt gefundenen Codex prüfen.
+            Wenn irgendeine Exclusion-Phrase im Text vorkommt,
+            wird der gesamte Eintrag NICHT aufgenommen.
+          */
+          select exists (
+            select 1
+            from public.codex_exclusions ex
+            where ex.entry_id = r.codex_id
+              and lower(v_text) like '%' || coalesce(ex.normalized_excluded_phrase, lower(ex.excluded_phrase)) || '%'
+          )
+          into v_is_excluded;
+
+          if not coalesce(v_is_excluded, false) then
+            for i in v_start_pos..v_end_pos loop
+              v_occupied[i] := 1;
+            end loop;
+
+            idx := array_position(v_direct_ids, r.codex_id);
+
+            if idx is null then
+              v_direct_ids := array_append(v_direct_ids, r.codex_id);
+              v_direct_pos := array_append(v_direct_pos, v_start_pos);
+            elsif v_start_pos < v_direct_pos[idx] then
+              v_direct_pos[idx] := v_start_pos;
+            end if;
+          end if;
+        end if;
+      end if;
+
+      v_search_from := v_start_pos + 1;
+    end loop;
+  end loop;
+
+  /*
+    2) Direkte Treffer in Reihenfolge ihres ersten Auftretens übernehmen
+  */
+  if coalesce(array_length(v_direct_ids, 1), 0) > 0 then
+    v_final_ids := array(
+      select v_direct_ids[g.i]
+      from generate_subscripts(v_direct_ids, 1) as g(i)
+      order by v_direct_pos[g.i], g.i
+    );
+  end if;
+
+  /*
+    3) Relations dazuziehen:
+       target_entry_id für alle direkt gematchten source_entry_id
+       - nur aktive Relations
+       - nur pull_into_context = true
+       - Ziel-Eintrag muss aktiv sein
+       - Ziel-Eintrag darf KEINE Exclusion im Text treffen
+  */
+  if coalesce(array_length(v_direct_ids, 1), 0) > 0 then
+    for rel in
+      select distinct
+        cr.target_entry_id
+      from public.codex_relations cr
+      join public.codex_entries ce_target
+        on ce_target.id = cr.target_entry_id
+      where cr.source_entry_id = any(v_direct_ids)
+        and cr.is_active = true
+        and cr.pull_into_context = true
+        and ce_target.is_active = true
+    loop
+      /*
+        Exclusions auch auf Relation-Ziele anwenden
+      */
+      select exists (
+        select 1
+        from public.codex_exclusions ex
+        where ex.entry_id = rel.target_entry_id
+          and lower(v_text) like '%' || coalesce(ex.normalized_excluded_phrase, lower(ex.excluded_phrase)) || '%'
+      )
+      into v_is_excluded;
+
+      if not coalesce(v_is_excluded, false) then
+        if array_position(v_final_ids, rel.target_entry_id) is null then
+          v_final_ids := array_append(v_final_ids, rel.target_entry_id);
+        end if;
+      end if;
+    end loop;
+  end if;
+
+  return coalesce(v_final_ids, '{}'::uuid[]);
+end;
+
+
+with input_ids as (
+  select unnest(p_codex_entry_ids) as codex_entry_id
+),
+matched_details as (
+  select *
+  from public.get_matching_codex_details_for_beat(
+    p_codex_entry_ids,
+    p_beat_id
+  )
+),
+grouped_details as (
+  select
+    md.codex_entry_id,
+    jsonb_agg(
+      md.codex_text
+      order by md.sort_order, md.title
+    ) as codex_details
+  from matched_details md
+  group by md.codex_entry_id
+),
+final_rows as (
+  select
+    ce.id as codex_entry_id,
+    ce.name as codex_title,
+    ce.description as codex_text,
+    coalesce(gd.codex_details, '[]'::jsonb) as codex_details
+  from input_ids i
+  join public.codex_entries ce
+    on ce.id = i.codex_entry_id
+  left join grouped_details gd
+    on gd.codex_entry_id = ce.id
+  where ce.is_active = true
+)
+select coalesce(
+  jsonb_agg(
+    jsonb_build_object(
+      'codex_title', fr.codex_title,
+      'codex_text', fr.codex_text,
+      'codex_details', fr.codex_details
+    )
+    order by fr.codex_title
+  ),
+  '[]'::jsonb
+)
+from final_rows fr;
+
+
+
+with target as (
+  select
+    sr.id as series_id,
+    b.id as beat_id,
+    ch.pov_character_entry_id as pov_character_entry_id,
+    s.starts_at as effective_at,
+    lower(coalesce(nullif(b.beat_text, ''), nullif(b.draft_text, ''), '')) as beat_text_normalized
+  from public.beats b
+  join public.scenes s
+    on s.id = b.scene_id
+  join public.chapters ch
+    on ch.id = s.chapter_id
+  join public.novels n
+    on n.id = ch.novel_id
+  join public.series sr
+    on sr.id = n.series_id
+  where b.id = p_beat_id
+),
+input_ids as (
+  select distinct unnest(p_codex_entry_ids) as codex_entry_id
+),
+seed_entries as (
+  select ce.id as codex_entry_id
+  from input_ids i
+  join public.codex_entries ce
+    on ce.id = i.codex_entry_id
+  where ce.is_active = true
+),
+seed_excluded as (
+  select distinct se.codex_entry_id
+  from seed_entries se
+  join public.codex_exclusions ex
+    on ex.entry_id = se.codex_entry_id
+  join target t
+    on true
+  where t.beat_text_normalized like '%' || coalesce(ex.normalized_excluded_phrase, lower(ex.excluded_phrase)) || '%'
+),
+seed_allowed as (
+  select se.codex_entry_id
+  from seed_entries se
+  left join seed_excluded sx
+    on sx.codex_entry_id = se.codex_entry_id
+  where sx.codex_entry_id is null
+),
+relation_tree as (
+  with recursive rel as (
+    select
+      sa.codex_entry_id as root_entry_id,
+      sa.codex_entry_id as codex_entry_id,
+      array[sa.codex_entry_id] as path
+    from seed_allowed sa
+
+    union all
+
+    select
+      rel.root_entry_id,
+      r.target_entry_id as codex_entry_id,
+      rel.path || r.target_entry_id
+    from rel
+    join public.codex_relations r
+      on r.source_entry_id = rel.codex_entry_id
+     and r.is_active = true
+     and r.pull_into_context = true
+    join public.codex_entries ce
+      on ce.id = r.target_entry_id
+     and ce.is_active = true
+    where not (r.target_entry_id = any(rel.path))
+  )
+  select distinct
+    rel.root_entry_id,
+    rel.codex_entry_id
+  from rel
+),
+candidate_codex_ids as (
+  select distinct codex_entry_id
+  from relation_tree
+),
+candidate_excluded_roots as (
+  select distinct cci.codex_entry_id
+  from candidate_codex_ids cci
+  join public.codex_exclusions ex
+    on ex.entry_id = cci.codex_entry_id
+  join target t
+    on true
+  where t.beat_text_normalized like '%' || coalesce(ex.normalized_excluded_phrase, lower(ex.excluded_phrase)) || '%'
+),
+excluded_relation_tree as (
+  with recursive exrel as (
+    select
+      cer.codex_entry_id
+    from candidate_excluded_roots cer
+
+    union
+
+    select
+      r.target_entry_id
+    from exrel
+    join public.codex_relations r
+      on r.source_entry_id = exrel.codex_entry_id
+     and r.is_active = true
+     and r.pull_into_context = true
+  )
+  select distinct codex_entry_id
+  from exrel
+),
+final_codex_ids as (
+  select cci.codex_entry_id
+  from candidate_codex_ids cci
+  left join excluded_relation_tree ert
+    on ert.codex_entry_id = cci.codex_entry_id
+  where ert.codex_entry_id is null
+),
+current_story_state as (
+  select
+    gss.variable_id,
+    gss.variable_key,
+    gss.variable_label,
+    gss.value_json
+  from public.get_story_state_at_beat(p_beat_id, 'gross') gss
+),
+candidate_entries as (
+  select
+    cce.id,
+    cce.codex_entry_id,
+    cce.title,
+    cce.codex_text,
+    cce.note,
+    cce.sort_order,
+    cce.condition_mode,
+    cce.requires_pov_character_id,
+    cce.valid_from,
+    cce.valid_to,
+    cce.series_id
+  from public.codex_conditional_entries cce
+  join final_codex_ids fci
+    on fci.codex_entry_id = cce.codex_entry_id
+  join public.codex_entries ce
+    on ce.id = cce.codex_entry_id
+  join target t
+    on t.series_id = cce.series_id
+  where cce.is_active = true
+    and ce.is_active = true
+    and (
+      cce.requires_pov_character_id is null
+      or cce.requires_pov_character_id = t.pov_character_entry_id
+    )
+    and (
+      t.effective_at is null
+      or (
+        (cce.valid_from is null or cce.valid_from <= t.effective_at)
+        and (cce.valid_to is null or cce.valid_to >= t.effective_at)
+      )
+    )
+),
+conditions_joined as (
+  select
+    ce.id as conditional_entry_id,
+    coalesce(ce.condition_mode, 'all') as condition_mode,
+    cond.id as condition_id,
+    cond.sort_order as condition_sort_order,
+    sv.id as variable_id,
+    sv.type as variable_type,
+    css.value_json as current_value_json,
+    cond.operator,
+    cond.compare_value_json,
+    coalesce(
+      public.evaluate_story_variable_condition(
+        sv.type,
+        css.value_json,
+        cond.operator,
+        cond.compare_value_json
+      ),
+      false
+    ) as condition_matches
+  from candidate_entries ce
+  left join public.codex_conditional_entry_variable_conditions cond
+    on cond.conditional_entry_id = ce.id
+  left join public.story_variables sv
+    on sv.id = cond.variable_id
+  left join current_story_state css
+    on css.variable_id = cond.variable_id
+),
+condition_summary as (
+  select
+    cj.conditional_entry_id,
+    max(cj.condition_mode) as condition_mode,
+    count(cj.condition_id) as total_conditions,
+    coalesce(
+      bool_and(cj.condition_matches) filter (where cj.condition_id is not null),
+      true
+    ) as all_conditions_match,
+    coalesce(
+      bool_or(cj.condition_matches) filter (where cj.condition_id is not null),
+      false
+    ) as any_condition_match
+  from conditions_joined cj
+  group by cj.conditional_entry_id
+),
+valid_entries as (
+  select
+    ce.*
+  from candidate_entries ce
+  left join condition_summary cs
+    on cs.conditional_entry_id = ce.id
+  where
+    coalesce(cs.total_conditions, 0) = 0
+    or (
+      coalesce(cs.condition_mode, 'all') = 'all'
+      and cs.all_conditions_match = true
+    )
+    or (
+      coalesce(cs.condition_mode, 'all') = 'any'
+      and cs.any_condition_match = true
+    )
+)
+select
+  ve.id as conditional_entry_id,
+  ve.codex_entry_id,
+  ve.title,
+  ve.codex_text,
+  ve.note,
+  ve.sort_order,
+  ve.condition_mode,
+  ve.requires_pov_character_id,
+  ve.valid_from,
+  ve.valid_to
+from valid_entries ve
+order by ve.codex_entry_id, ve.sort_order, ve.title;
+
+
+
+
+
+
+
+```
+
+```typescript
+
+declare
+  v_type text;
+  v_op text;
+
+  l_raw text;
+  r_raw text;
+
+  l_bool boolean;
+  r_bool boolean;
+
+  l_int bigint;
+  r_int bigint;
+
+  l_num numeric;
+  r_num numeric;
+begin
+  if p_left_value is null or p_right_value is null then
+    return false;
+  end if;
+
+  v_type := lower(coalesce(p_variable_type, ''));
+  v_op := lower(btrim(coalesce(p_operator, '')));
+
+  l_raw := coalesce(p_left_value ->> 'value', p_left_value #>> '{}');
+  r_raw := coalesce(p_right_value ->> 'value', p_right_value #>> '{}');
+
+  if v_type = 'boolean' then
+    l_bool := l_raw::boolean;
+    r_bool := r_raw::boolean;
+
+    case v_op
+      when '='  then return l_bool = r_bool;
+      when '<>' then return l_bool <> r_bool;
+      when '!=' then return l_bool <> r_bool;
+      else return false;
+    end case;
+
+  elsif v_type in ('integer', 'int', 'bigint') then
+    l_int := l_raw::bigint;
+    r_int := r_raw::bigint;
+
+    case v_op
+      when '='  then return l_int = r_int;
+      when '<>' then return l_int <> r_int;
+      when '!=' then return l_int <> r_int;
+      when '<'  then return l_int < r_int;
+      when '<=' then return l_int <= r_int;
+      when '>'  then return l_int > r_int;
+      when '>=' then return l_int >= r_int;
+      else return false;
+    end case;
+
+  elsif v_type in ('numeric', 'number', 'decimal', 'float') then
+    l_num := l_raw::numeric;
+    r_num := r_raw::numeric;
+
+    case v_op
+      when '='  then return l_num = r_num;
+      when '<>' then return l_num <> r_num;
+      when '!=' then return l_num <> r_num;
+      when '<'  then return l_num < r_num;
+      when '<=' then return l_num <= r_num;
+      when '>'  then return l_num > r_num;
+      when '>=' then return l_num >= r_num;
+      else return false;
+    end case;
+
+  elsif v_type in ('text', 'string', 'enum') then
+    case v_op
+      when '=' then return l_raw = r_raw;
+      when '<>' then return l_raw <> r_raw;
+      when '!=' then return l_raw <> r_raw;
+      when '<' then return l_raw < r_raw;
+      when '<=' then return l_raw <= r_raw;
+      when '>' then return l_raw > r_raw;
+      when '>=' then return l_raw >= r_raw;
+      when 'like' then return l_raw ilike r_raw;
+      when 'not like' then return l_raw not ilike r_raw;
+      else return false;
+    end case;
+
+  elsif v_type = 'json' then
+    case v_op
+      when '='  then return p_left_value = p_right_value;
+      when '<>' then return p_left_value <> p_right_value;
+      when '!=' then return p_left_value <> p_right_value;
+      else return false;
+    end case;
+
+  else
+    return false;
+  end if;
+end;
+
+```
+

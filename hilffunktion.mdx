@@ -1,0 +1,138 @@
+---
+title: render_codex_payload
+---
+```typescript
+
+with entries as (
+  select
+    elem,
+    ord
+  from jsonb_array_elements(coalesce(p_payload, '[]'::jsonb)) with ordinality as t(elem, ord)
+),
+rendered as (
+  select
+    ord,
+    array_to_string(
+      array_remove(
+        array[
+          format('<codex entry name="%s">', coalesce(elem->>'codex_title', '')),
+          coalesce(elem->>'codex_title', ''),
+          coalesce(elem->>'codex_text', ''),
+          case
+            when jsonb_typeof(elem->'codex_details') = 'array' then (
+              select string_agg(detail_text, E'\n\n' order by didx)
+              from (
+                select
+                  didx,
+                  nullif(
+                    case
+                      when jsonb_typeof(d) = 'string' then trim(both '"' from d::text)
+                      when jsonb_typeof(d) = 'object' then coalesce(
+                        d->>'codex_detail',
+                        d->>'detail_text',
+                        d->>'text',
+                        ''
+                      )
+                      else ''
+                    end,
+                    ''
+                  ) as detail_text
+                from jsonb_array_elements(coalesce(elem->'codex_details', '[]'::jsonb)) with ordinality as dd(d, didx)
+              ) q
+              where detail_text is not null
+            )
+            else null
+          end,
+          '</codex entry>'
+        ],
+        null
+      ),
+      E'\n'
+    ) as entry_text
+  from entries
+)
+select array_to_string(
+  array_remove(
+    array[
+      format('<%s>', p_root_tag),
+      (select string_agg(entry_text, E'\n' order by ord) from rendered),
+      format('</%s>', p_root_tag)
+    ],
+    null
+  ),
+  E'\n'
+);
+
+```
+
+```typescript
+create or replace function public.render_codex_payload(
+  p_payload jsonb,
+  p_root_tag text
+)
+returns text
+language sql
+immutable
+as $function$
+with entries as (
+  select
+    elem,
+    ord
+  from jsonb_array_elements(coalesce(p_payload, '[]'::jsonb)) with ordinality as t(elem, ord)
+),
+rendered as (
+  select
+    ord,
+    array_to_string(
+      array_remove(
+        array[
+          format('<codex entry name="%s">', coalesce(elem->>'codex_title', '')),
+          coalesce(elem->>'codex_title', ''),
+          coalesce(elem->>'codex_text', ''),
+          case
+            when jsonb_typeof(elem->'codex_details') = 'array' then (
+              select string_agg(detail_text, E'\n\n' order by didx)
+              from (
+                select
+                  didx,
+                  nullif(
+                    case
+                      when jsonb_typeof(d) = 'string' then trim(both '"' from d::text)
+                      when jsonb_typeof(d) = 'object' then coalesce(
+                        d->>'codex_detail',
+                        d->>'detail_text',
+                        d->>'text',
+                        ''
+                      )
+                      else ''
+                    end,
+                    ''
+                  ) as detail_text
+                from jsonb_array_elements(coalesce(elem->'codex_details', '[]'::jsonb)) with ordinality as dd(d, didx)
+              ) q
+              where detail_text is not null
+            )
+            else null
+          end,
+          '</codex entry>'
+        ],
+        null
+      ),
+      E'\n'
+    ) as entry_text
+  from entries
+)
+select array_to_string(
+  array_remove(
+    array[
+      format('<%s>', p_root_tag),
+      (select string_agg(entry_text, E'\n' order by ord) from rendered),
+      format('</%s>', p_root_tag)
+    ],
+    null
+  ),
+  E'\n'
+);
+$function$;
+```
+

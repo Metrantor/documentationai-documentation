@@ -70,6 +70,27 @@
                 "group": "Anwendungs-Oberfläche",
                 "pages": [
                   {
+                    "group": "Codec Erstellung für Prompts",
+                    "pages": [
+                      {
+                        "title": "Auufruf und Ergebnisse",
+                        "path": "auufruf-und-ergebnisse"
+                      },
+                      {
+                        "title": "Erklärung der Supabasefunktionen",
+                        "path": "erklrung-der-supabasefunktionen"
+                      },
+                      {
+                        "title": "render_codex_payload",
+                        "path": "hilffunktion"
+                      },
+                      {
+                        "title": "Coder erstellung für Propmt",
+                        "path": "coder-erstellung-fr-propmt"
+                      }
+                    ]
+                  },
+                  {
                     "group": "Story States",
                     "pages": [
                       {
@@ -108,8 +129,16 @@
                     "path": "anwendungs-oberflaeche-ueberblick"
                   },
                   {
-                    "group": "Codex",
+                    "group": "Technische Dokumentation Codex + Super Codex",
                     "pages": [
+                      {
+                        "title": "Technische Doskumentation der Supabase Funktionen",
+                        "path": "technische-doskumentation-der-supabase-funktionen"
+                      },
+                      {
+                        "title": "Supabase Funktionen",
+                        "path": "supabase-funktionen"
+                      },
                       {
                         "title": "Codex-Compiler",
                         "path": "codex-compiler"
