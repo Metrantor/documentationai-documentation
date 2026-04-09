@@ -1,0 +1,859 @@
+---
+title: Kodex-Für Text und Beat bilden
+---
+# Technische Dokumentation
+
+## Workflow: „Kodex-Für Text und Beat bilden“
+
+## 1. Ziel des Workflows
+
+Der Workflow erzeugt aus drei Eingaben:
+
+- `series_id`
+
+- `beat_id`
+
+- `text`
+
+zwei getrennte Kontextblöcke für spätere Prompt-Nutzung:
+
+- **Standard-Codex**
+
+- **Super-Codex**
+
+Die Logik dahinter ist:
+
+1. Im Text werden normale Codex-Einträge identifiziert.
+
+2. Aus diesen normalen Codex-Einträgen werden zusätzliche **Super-Codex-Einträge** abgeleitet.
+
+3. Doppelte Einträge werden aus dem normalen Codex entfernt, wenn sie im Super-Codex erneut auftauchen.
+
+4. Für beide Mengen wird anschließend ein strukturierter Payload für den gegebenen Beat erzeugt.
+
+5. Am Ende werden zwei XML-ähnliche Textblöcke aufgebaut:
+
+   - `<codex> ... </codex>`
+
+   - `<super codex> ... </super codex>`
+
+Der Workflow trennt damit bewusst zwischen:
+
+- direkt bzw. normal relevantem Codex
+
+- abgeleitetem, kombinatorischem oder kontextuell verdichtetem Super-Codex
+
+Diese Trennung ist später für Promptsteuerung und Kontextgewichtung wichtig.
+
+---
+
+# 2. Eingaben des Workflows
+
+Der Workflow wird über einen `Execute Workflow Trigger` gestartet und erwartet drei Felder:
+
+- `series_id`
+
+- `beat_id`
+
+- `text`
+
+Im gepinnten Beispiel sind das:
+
+- `series_id = 95ea7620-8d91-4fb8-9fb3-82fe78125141`
+
+- `beat_id = 18f58f5a-a454-4cdc-8a60-7eec80c1b007`
+
+- `text = Freitext mit Codex-relevanten Begriffen`
+
+Diese Eingaben werden vom Workflow unverändert an die nachfolgenden Schritte weitergereicht.
+
+---
+
+# 3. Fachlicher Gesamtfluss
+
+## 3.1 Übersicht
+
+Der Workflow arbeitet in sieben fachlichen Stufen:
+
+1. **Normale Codex-IDs aus dem Text ermitteln**
+
+2. **Normale IDs in SQL-verwertbare UUID-Arrays überführen**
+
+3. **Super-Codex-IDs auf Basis der normalen Codex-IDs berechnen**
+
+4. **Normale Codex-IDs um Super-Codex-Dubletten bereinigen**
+
+5. **Für beide Mengen Codex-Payloads für den Beat erzeugen**
+
+6. **Payloads in Prompt-Blöcke serialisieren**
+
+7. **Standard-Codex und Super-Codex getrennt weitergeben**
+
+---
+
+# 4. Node-für-Node-Dokumentation
+
+## 4.1 `When Executed by Another Workflow`
+
+Typ: `executeWorkflowTrigger`
+
+Dieser Node stellt den Einstiegspunkt dar.\
+Er definiert die Eingaben:
+
+- `series_id`
+
+- `beat_id`
+
+- `text`
+
+Er hat keine Geschäftslogik, sondern liefert nur den Input an den restlichen Workflow.
+
+---
+
+## 4.2 `Normale Codex-IDs aus text ermitteln`
+
+Typ: `executeWorkflow`
+
+Dieser Node ruft einen Unterworkflow auf:\
+**„Kodex-Einträge identifizieren“**
+
+Übergeben werden:
+
+- `series_id`
+
+- `text`
+
+Ziel dieses Unterworkflows ist es, eine erste Menge von Codex-IDs zu liefern, die im Text erkannt wurden.
+
+Inhaltlich basiert dieser Schritt auf dem Matching-Ansatz aus der Codex-Matching-Dokumentation:
+
+- Namen und Aliasse aktiver Codex-Einträge
+
+- längere Begriffe zuerst
+
+- Wortgrenzenprüfung
+
+- Überlappungsschutz
+
+- Hervorhebung bzw. Identifikation präziser Treffer zuerst
+
+Aus dem späteren Gesamtsystem ist bekannt, dass die zugehörige Supabase-Funktion hierfür nicht nur reine Texttreffer berücksichtigt, sondern auch:
+
+- Aliasse
+
+- Exclusions
+
+- 1-Hop-Relationen
+
+---
+
+## 4.3 `Normale IDs zusammenfassen`
+
+Typ: `code`
+
+Dieser Node liest die vom Unterworkflow gelieferten IDs aus:
+
+```typescript
+$input.first().json.codex_map[0].get_matching_codex_ids_from_text
+
+```
+
+Dann werden:
+
+- leere Werte entfernt
+
+- Duplikate entfernt
+
+- die IDs in ein SQL-verwendbares Format überführt
+
+Ergebnis:
+
+```typescript
+{
+  "sqlUuidArray": "'uuid1'::uuid, 'uuid2'::uuid, ..."
+}
+
+```
+
+Dieser Schritt ist notwendig, weil die nachfolgenden Postgres-Nodes UUID-Arrays als SQL-Ausdruck erwarten.
+
+---
+
+## 4.4 `Normale IDs zusammenfassen und cast`
+
+Typ: `code`
+
+Dieser Node erzeugt eine zweite Darstellung derselben IDs, diesmal zunächst ohne `::uuid` pro Element:
+
+```typescript
+ids.map(id => `'${id}'`).join(', ')
+
+```
+
+Der Node wirkt im aktuellen Workflow wie ein Hilfsschritt zur vorbereitenden Übergabe an den folgenden SQL-Aufruf.\
+Fachlich erzeugt er keine neue Logik, sondern nur ein alternatives Stringformat.
+
+---
+
+## 4.5 `Super Codex ermitteln`
+
+Typ: `postgres`
+
+SQL:
+
+```typescript
+select public.get_super_codex_ids(
+  array[
+    {{ $('Normale IDs zusammenfassen').item.json.sqlUuidArray }}
+  ]
+);
+
+```
+
+Dieser Node ruft die Supabase-Funktion `get_super_codex_ids(...)` auf.
+
+Ziel:
+
+- auf Basis der bereits gefundenen normalen Codex-IDs zusätzliche **Super-Codex-IDs** ableiten
+
+Die Logik dahinter:
+
+- Super-Codex-Regeln definieren Ziel-Codex-Einträge
+
+- diese Regeln enthalten Auslöser
+
+- wenn alle Auslöser vorhanden sind, wird der Ziel-Eintrag zusätzlich aufgenommen
+
+Damit werden kombinatorische oder abgeleitete Kontext-Einträge erzeugt.
+
+---
+
+## 4.6 `Super Codex IDs zusammenfassen`
+
+Typ: `code`
+
+Dieser Node verarbeitet die von `get_super_codex_ids(...)` zurückgegebenen IDs.
+
+Er:
+
+- entfernt leere Werte
+
+- entfernt Duplikate
+
+- formatiert wieder ein SQL-UUID-Array
+
+Ergebnis:
+
+```typescript
+{
+  "sqlUuidArray": "'uuidA'::uuid, 'uuidB'::uuid, ..."
+}
+
+```
+
+Damit stehen die Super-Codex-IDs für weitere SQL-Schritte bereit.
+
+---
+
+## 4.7 `Normale Codex Einträge um Super Codex Einträge bereinigen`
+
+Typ: `postgres`
+
+SQL:
+
+```typescript
+select public.remove_super_codex_duplicates(
+  array[
+    {{ $('Normale IDs zusammenfassen').item.json.sqlUuidArray }}
+  ],
+  array[
+    {{ $('Super Codex IDs zusammenfassen').item.json.sqlUuidArray }}
+  ]
+);
+
+```
+
+Diese Funktion entfernt aus der Basisliste jene IDs, die gleichzeitig auch im Super-Codex auftauchen.
+
+Fachlicher Hintergrund:
+
+- Einträge, die sowohl direkt erkannt wurden als auch als Super-Codex gelten, sollen für die spätere Promptpositionierung **nur im Super-Codex-Bereich** erscheinen
+
+- der Standard-Codex wird damit bereinigt und redundanzfrei
+
+Das ist eine bewusste Priorisierung:\
+**Super-Codex gewinnt gegenüber Standard-Codex.**
+
+---
+
+## 4.8 `Finale Standard IDs bilden`
+
+Typ: `code`
+
+Dieser Node formatiert das Ergebnis von `remove_super_codex_duplicates(...)` erneut in eine saubere SQL-UUID-Liste.
+
+Danach existieren zwei disjunkte Mengen:
+
+- Standard-Codex-IDs
+
+- Super-Codex-IDs
+
+Beide sind nun bereit für die Payload-Erzeugung.
+
+---
+
+## 4.9 `Standard-Codex zusammenstellen`
+
+Typ: `postgres`
+
+SQL:
+
+```typescript
+select public.get_prompt_codex_payload_for_beat(
+  array[
+    {{ $json.sqlUuidArray }}
+  ],
+  '{{ $('When Executed by Another Workflow').item.json.beat_id }}'::uuid
+);
+
+```
+
+Diese Funktion erzeugt für die finalen Standard-Codex-IDs einen strukturierten JSONB-Payload für den gegebenen Beat.
+
+Der Payload enthält pro Codex-Eintrag:
+
+- `codex_title`
+
+- `codex_text`
+
+- `codex_details`
+
+Die Details werden beat- und regelabhängig ermittelt.
+
+---
+
+## 4.10 `Super-Codex zusammenstellen`
+
+Typ: `postgres`
+
+Gleiche Funktion wie oben, aber mit den Super-Codex-IDs:
+
+```typescript
+select public.get_prompt_codex_payload_for_beat(
+  array[
+    {{ $('Super Codex IDs zusammenfassen').item.json.sqlUuidArray }}
+  ],
+  '{{ $('When Executed by Another Workflow').item.json.beat_id }}'::uuid
+);
+
+```
+
+Ergebnis:
+
+- strukturierter Payload ausschließlich für den Super-Codex
+
+Damit sind beide Kontextbereiche nicht nur als ID-Liste, sondern als inhaltlich aufbereitete Beat-Kontexte verfügbar.
+
+---
+
+## 4.11 `Normalen Codex erstellen`
+
+Typ: `code`
+
+Dieser Node transformiert den JSONB-Payload des Standard-Codex in einen XML-ähnlichen Textblock.
+
+Form:
+
+```typescript
+<codex>
+  <codex entry name="...">
+    Titel
+    Haupttext
+    Details
+  </codex entry>
+</codex>
+
+```
+
+Der Node ist robust implementiert und verarbeitet `codex_details` sowohl dann korrekt, wenn sie:
+
+- einfache Strings sind
+
+- oder Objekte mit Feldern wie `codex_detail`, `detail_text` oder `text`
+
+enthalten.
+
+---
+
+## 4.12 `Normalen Codex erstellen1`
+
+Typ: `code`
+
+Trotz des irreführenden Namens erzeugt dieser Node den **Super-Codex-Block**.
+
+Form:
+
+```typescript
+<super codex>
+  <codex entry name="...">
+    Titel
+    Haupttext
+    Details
+  </codex entry>
+</super codex>
+
+```
+
+Der Aufbau ist analog zum normalen Codex, aber in einem separaten Container.\
+Damit ist die spätere Promptsteuerung eindeutig möglich.
+
+---
+
+# 5. Supabase-Funktionen im verwendeten Gesamtsystem
+
+Im Workflow selbst werden direkt drei Funktionen genutzt:
+
+- `get_super_codex_ids(uuid[])`
+
+- `remove_super_codex_duplicates(uuid[], uuid[])`
+
+- `get_prompt_codex_payload_for_beat(uuid[], uuid)`
+
+Zusätzlich ist für den Unterworkflow fachlich relevant:
+
+- `get_matching_codex_ids_from_text(text, text)`
+
+Und mittelbar daran gekoppelt:
+
+- `get_matching_codex_details_for_beat(uuid[], uuid)`
+
+- `evaluate_story_variable_condition(text, jsonb, text, jsonb)`
+
+Ich dokumentiere diese Funktionen hier auf Basis unseres gemeinsam entwickelten Stands.
+
+---
+
+## 5.1 `get_matching_codex_ids_from_text(p_series_id text, p_text text) -> uuid[]`
+
+### Zweck
+
+Ermittelt aus einem Text die relevanten normalen Codex-IDs.
+
+### Berücksichtigte Logik
+
+- aktive Codex-Einträge
+
+- aktive Aliasse
+
+- `track_mentions = true`
+
+- `ai_context_mode <> 'never_include'`
+
+- längste Begriffe zuerst
+
+- Wortgrenzenprüfung
+
+- Überlappungsschutz
+
+- Exclusions
+
+- direkte Relationen (1-Hop)
+
+### Ergebnis
+
+Ein `uuid[]`-Array mit:
+
+- direkt erkannten Codex-Einträgen
+
+- plus relationell nachgezogenen Einträgen
+
+### Einschränkung
+
+Relationen werden aktuell **nicht rekursiv**, sondern nur eine Ebene tief aufgelöst.
+
+---
+
+## 5.2 `get_super_codex_ids(p_base_codex_ids uuid[]) -> uuid[]`
+
+### Zweck
+
+Ermittelt zusätzliche Codex-IDs, die als **Super-Codex** gelten.
+
+### Logik
+
+- aktive Super-Codex-Regeln prüfen
+
+- Regeltyp `all_required`
+
+- alle Trigger einer Regel müssen im Basis-Set enthalten sein
+
+- Ziel-Eintrag muss aktiv sein
+
+### Ergebnis
+
+Ein `uuid[]`-Array nur mit den zusätzlich abgeleiteten Super-Codex-IDs.
+
+### Fachliche Bedeutung
+
+Diese Funktion erzeugt **abgeleiteten Kontext**, der nicht direkt im Text vorkommen muss.
+
+---
+
+## 5.3 `remove_super_codex_duplicates(p_base_codex_ids uuid[], p_super_codex_ids uuid[]) -> uuid[]`
+
+### Zweck
+
+Entfernt IDs aus dem Standard-Codex, wenn dieselben IDs bereits im Super-Codex vorkommen.
+
+### Logik
+
+- Basisliste minus Super-Liste
+
+- Duplikate werden unterdrückt
+
+- Ergebnis ist die bereinigte Standardmenge
+
+### Fachliche Bedeutung
+
+Der Super-Codex erhält Priorität in der Promptpositionierung.
+
+---
+
+## 5.4 `get_prompt_codex_payload_for_beat(p_codex_entry_ids uuid[], p_beat_id uuid) -> jsonb`
+
+### Zweck
+
+Erzeugt den eigentlichen Prompt-Payload für eine Menge von Codex-Einträgen im Kontext eines bestimmten Beats.
+
+### Rückgabe
+
+JSONB-Array mit Einträgen in dieser Struktur:
+
+```typescript
+[
+  {
+    "codex_title": "...",
+    "codex_text": "...",
+    "codex_details": [...]
+  }
+]
+
+```
+
+### Wichtige Logik
+
+Die Funktion wurde so angepasst, dass **alle übergebenen Codex-IDs** zurückgegeben werden, auch wenn für einzelne Einträge keine passenden Details gefunden wurden.\
+In diesem Fall ist `codex_details = []`.
+
+### Fachliche Bedeutung
+
+Dadurch bleibt der Haupteintrag sichtbar, auch wenn keine bedingten Detaileinträge matchen.
+
+---
+
+## 5.5 `get_matching_codex_details_for_beat(p_codex_entry_ids uuid[], p_beat_id uuid)`
+
+### Zweck
+
+Ermittelt die passenden **bedingten Codex-Details** für einen Beat.
+
+### Berücksichtigt
+
+- Exclusions
+
+- rekursive Relationen innerhalb des Detailkontexts
+
+- Zeitfenster (`valid_from`, `valid_to`)
+
+- POV-Charakter
+
+- Story-State am Beat
+
+- Bedingungsmodi:
+
+  - `all`
+
+  - `any`
+
+### Ergebnis
+
+Tabellarische Detailtreffer pro Codex-Eintrag.
+
+### Fachliche Bedeutung
+
+Diese Funktion entscheidet, welche Detaileinträge in einem konkreten Beat sichtbar sein dürfen.
+
+---
+
+## 5.6 `evaluate_story_variable_condition(p_variable_type text, p_left_value jsonb, p_operator text, p_right_value jsonb) -> boolean`
+
+### Zweck
+
+Bewertet eine einzelne Regelbedingung für Story-Variablen.
+
+### Unterstützte Typen
+
+- `boolean`
+
+- `integer`
+
+- `numeric`
+
+- `text`
+
+- `enum`
+
+- `json`
+
+### Unterstützte Operatoren
+
+- `=`
+
+- `<>`
+
+- `!=`
+
+- `<`
+
+- `<=`
+
+- `>`
+
+- `>=`
+
+- `like`
+
+- `not like`
+
+### Wichtige Besonderheit
+
+`like` wird intern **case-insensitive** als `ILIKE` interpretiert.
+
+### Beispiel
+
+Wenn links `Fritz` und rechts `%TZ` steht, liefert `like` trotzdem `true`.
+
+---
+
+# 6. Datenfluss im Workflow
+
+## 6.1 Standardfluss
+
+```typescript
+Input (series_id, beat_id, text)
+    ↓
+Normale Codex-IDs aus Text
+    ↓
+Super-Codex-IDs aus Basis ableiten
+    ↓
+Standard-Codex um Super-Dubletten bereinigen
+    ↓
+Payload für Standard-Codex erzeugen
+    ↓
+Payload für Super-Codex erzeugen
+    ↓
+Textblöcke <codex> und <super codex> serialisieren
+
+```
+
+---
+
+# 7. Prompt-Struktur
+
+Der Workflow baut am Ende zwei getrennte Kontexte:
+
+## 7.1 Standard-Codex
+
+```typescript
+<codex>
+  <codex entry name="...">
+    ...
+  </codex entry>
+</codex>
+
+```
+
+## 7.2 Super-Codex
+
+```typescript
+<super codex>
+  <codex entry name="...">
+    ...
+  </codex entry>
+</super codex>
+
+```
+
+Diese Trennung ist technisch wertvoll, weil der Prompt später unterscheiden kann zwischen:
+
+- normalem, direkt oder relationell relevantem Wissen
+
+- abgeleitetem, verdichtetem Super-Codex-Wissen
+
+---
+
+# 8. Designentscheidungen
+
+## 8.1 Super-Codex gewinnt bei Dubletten
+
+Wenn ein Eintrag in beiden Mengen auftaucht:
+
+- im Standard-Codex
+
+- im Super-Codex
+
+dann bleibt er nur im Super-Codex erhalten.
+
+### Grund
+
+Der Super-Codex ist semantisch spezieller und für die spätere Promptsteuerung meist wertvoller.
+
+---
+
+## 8.2 Standard- und Super-Codex werden getrennt serialisiert
+
+Der Workflow mischt beide Mengen nicht.
+
+### Vorteil
+
+- klarere Promptstruktur
+
+- gezieltere Ansprache im LLM-Prompt
+
+- bessere Nachvollziehbarkeit
+
+---
+
+## 8.3 Payload-Erzeugung erfolgt beat-sensitiv
+
+Die Funktion `get_prompt_codex_payload_for_beat(...)` hängt vom Beat ab.
+
+### Bedeutung
+
+Der gleiche Codex-Eintrag kann je nach Beat unterschiedliche Detailinformationen mitbringen.
+
+---
+
+# 9. Schwachstellen und Risiken
+
+## 9.1 Uneindeutige Funktionsüberladungen
+
+Du hattest zeitweise zwei Varianten von:
+
+- `get_matching_codex_ids_from_text(uuid, text)`
+
+- `get_matching_codex_ids_from_text(text, text)`
+
+Das ist technisch erlaubt, aber riskant.
+
+### Empfehlung
+
+Nur die tatsächlich genutzte Version behalten und die andere löschen, um Fehlaufrufe zu vermeiden.
+
+---
+
+## 9.2 n8n arbeitet stark mit SQL-Stringbau
+
+Mehrere Nodes bauen SQL-Arrays als Strings zusammen.
+
+### Risiko
+
+- fehleranfällig bei Sonderzeichen
+
+- potenziell unsauber bei leeren Arrays
+
+- schwierig zu debuggen
+
+### Empfehlung
+
+Später besser auf parameterisierte Query-Aufrufe oder sauberere RPC-Kapselung umstellen.
+
+---
+
+## 9.3 Node-Namen sind teils missverständlich
+
+`Normalen Codex erstellen1` erzeugt faktisch den Super-Codex.
+
+### Empfehlung
+
+Umbenennen in:
+
+- `Super-Codex String erstellen`
+
+---
+
+## 9.4 Super-Codex aktuell nur `all_required`
+
+Das ist für Version 1 gut, aber fachlich begrenzt.
+
+### Später denkbar
+
+- `any_required`
+
+- Mindestanzahl
+
+- Negativtrigger
+
+- Prioritäten
+
+---
+
+# 10. Empfohlene Weiterentwicklung
+
+## Kurzfristig
+
+- Node-Namen bereinigen
+
+- Overload-Probleme bei Supabase-Funktionen auflösen
+
+- Logging der Zwischenmengen ergänzen:
+
+  - Basis-IDs
+
+  - Super-IDs
+
+  - finale Standard-IDs
+
+## Mittelfristig
+
+- Wrapper-Funktion bauen, die alles in einem Schritt liefert:
+
+  - `base_codex_ids`
+
+  - `super_codex_ids`
+
+  - `plain_codex_ids`
+
+- Stringbasierten SQL-Aufbau in n8n reduzieren
+
+## Langfristig
+
+- rekursive Relationen optional machen
+
+- Super-Codex-Regeln erweitern
+
+- Debug-Funktionen für Regel- und Detailauswertung ergänzen
+
+---
+
+# 11. Welche Supabase-Funktionen ich für eine noch exaktere Dokumentation noch bräuchte
+
+Ich kann die Dokumentation jetzt schon gut schreiben, aber wenn du eine **wirklich vollständige technische Referenz mit exakten Signaturen, SQL und Rückgabetypen** willst, wären diese Definitionen noch hilfreich:
+
+- `get_super_codex_ids(...)`
+
+- `remove_super_codex_duplicates(...)`
+
+- `get_matching_codex_ids_from_text(text,text)`
+
+- `get_prompt_codex_payload_for_beat(...)`
+
+- `get_matching_codex_details_for_beat(...)`
+
+- optional die Tabellen:
+
+  - `codex_super_rules`
+
+  - `codex_super_rule_triggers`
+
+Wenn du willst, kann ich dir daraus im nächsten Schritt ein richtig sauberes **Markdown-Architektur-Dokument** machen, so dass du es direkt in dein Projekt legen kannst.

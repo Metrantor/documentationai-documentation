@@ -111,6 +111,10 @@
                     "group": "Codex",
                     "pages": [
                       {
+                        "title": "Codex-Compiler",
+                        "path": "codex-compiler"
+                      },
+                      {
                         "title": "Codex",
                         "path": "anwendungs-oberflaeche-codex"
                       }
