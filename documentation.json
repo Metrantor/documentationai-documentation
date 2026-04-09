@@ -73,6 +73,10 @@
                     "group": "Story Context Aggregation",
                     "pages": [
                       {
+                        "title": "Context Compiler",
+                        "path": "context-compiler"
+                      },
+                      {
                         "title": "get_relevant_inflow_chapters(",
                         "path": "get_relevant_inflow_chapters("
                       },

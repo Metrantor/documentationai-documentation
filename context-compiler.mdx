@@ -1,0 +1,864 @@
+# Technische Dokumentation
+
+## Flow-basierter Kontext-Compiler
+
+### Ganz einfach erklärt
+
+Stell dir vor, deine Geschichte ist wie ein großer Weg durch einen Wald.
+
+Es gibt:
+
+* **Romane** = große Waldstücke
+* **Kapitel** = Wege darin
+* **Szenen** = kleine Wegabschnitte
+* **Beats** = einzelne Schritte
+
+Und du willst wissen:
+
+> **Welche Texte soll die KI als Erinnerung bekommen, bevor sie weiterschreibt?**
+
+Genau dafür sind diese Funktionen da.
+
+---
+
+# Was das Ganze macht
+
+Die Funktionen sammeln Texte aus deiner Story und teilen sie in vier Kisten ein:
+
+1. **Mainflow Volltext**
+   Das ist der normale Hauptweg mit den echten Beat-Texten.
+
+2. **Mainflow Summaries**
+   Das ist der Hauptweg, aber als Zusammenfassungen.
+
+3. **Inflow Volltext**
+   Das sind Seitenwege, die in den Hauptweg hineinlaufen, mit echten Beat-Texten.
+
+4. **Inflow Summaries**
+   Das sind die Seitenwege als Zusammenfassungen.
+
+So bekommt die KI nicht einfach einen wilden Textklumpen, sondern sauber sortierte Bausteine.
+
+---
+
+# Die Funktionen im Überblick
+
+Wir haben vier wichtige Funktionen:
+
+1. `public.get_story_context_target`
+2. `public.get_relevant_mainflow_chapters`
+3. `public.get_relevant_inflow_chapters`
+4. `public.compile_story_context`
+
+---
+
+# Bild im Kopf: So arbeiten die Funktionen zusammen
+
+```text id="n0m1kr"
+Du gibst:
+  ├─ ein Kapitel
+  └─ oder einen Beat
+
+          ↓
+
+get_story_context_target
+  → findet heraus:
+    - welches Kapitel gemeint ist
+    - welcher Beat gemeint ist
+    - in welchem Roman / in welcher Serie wir sind
+
+          ↓
+
+get_relevant_mainflow_chapters
+  → sammelt die Kapitel des Hauptwegs
+
+          ↓
+
+get_relevant_inflow_chapters
+  → sammelt die Kapitel der Seitenwege
+
+          ↓
+
+compile_story_context
+  → sammelt daraus die Texte
+  → sortiert sie in 4 Blöcke
+  → achtet auf Limits
+  → gibt alles zurück
+```
+
+---
+
+# Funktion 1
+
+# `public.get_story_context_target`
+
+## Was sie macht
+
+Diese Funktion schaut zuerst:
+
+* Hast du ein **Kapitel** gegeben?
+* Oder hast du einen **Beat** gegeben?
+
+Dann sagt sie:
+
+* wo wir sind
+* welches Kapitel gemeint ist
+* welcher Beat gemeint ist
+* in welchem Roman wir sind
+* in welcher Serie wir sind
+
+## Einfach gesagt
+
+Das ist der **Pfadfinder**.
+Er sagt: „Ah, da willst du hin.“
+
+---
+
+## Aufruf
+
+```sql id="4jrhxr"
+select *
+from public.get_story_context_target(
+  p_chapter_id := 'KAPITEL_UUID',
+  p_beat_id := null
+);
+```
+
+oder
+
+```sql id="xm1hcm"
+select *
+from public.get_story_context_target(
+  p_chapter_id := null,
+  p_beat_id := 'BEAT_UUID'
+);
+```
+
+---
+
+## Parameter
+
+### `p_chapter_id uuid default null`
+
+Die ID eines Kapitels.
+
+**Bedeutung:**
+Wenn du ein ganzes Kapitel als Ziel meinst, kommt diese ID hier rein.
+
+---
+
+### `p_beat_id uuid default null`
+
+Die ID eines Beats.
+
+**Bedeutung:**
+Wenn du einen ganz bestimmten Punkt mitten in einem Kapitel meinst, kommt diese ID hier rein.
+
+---
+
+## Wichtige Regel
+
+Du darfst **genau einen** von beiden setzen:
+
+* entweder `p_chapter_id`
+* oder `p_beat_id`
+
+Nicht beide.
+Nicht keinen.
+
+---
+
+## Rückgabewerte
+
+Die Funktion gibt diese Dinge zurück:
+
+### `target_mode text`
+
+Sagt, was du übergeben hast:
+
+* `'chapter'`
+* oder `'beat'`
+
+### `series_id uuid`
+
+Die Serie, zu der das Ganze gehört.
+
+### `novel_id uuid`
+
+Der Roman, zu dem das Ganze gehört.
+
+### `chapter_id uuid`
+
+Das Zielkapitel.
+
+### `beat_id uuid`
+
+Der Zielbeat, wenn einer gesetzt wurde.
+
+### `target_scene_sort integer`
+
+Die Reihenfolge der Zielszene, wenn ein Beat übergeben wurde.
+
+### `target_beat_sort integer`
+
+Die Reihenfolge des Zielbeats, wenn ein Beat übergeben wurde.
+
+---
+
+## Bild im Kopf
+
+```text id="3sm8ec"
+Du zeigst auf etwas.
+Die Funktion sagt:
+"Okay, du meinst GENAU DIESEN Ort."
+```
+
+---
+
+# Funktion 2
+
+# `public.get_relevant_mainflow_chapters`
+
+## Was sie macht
+
+Diese Funktion sammelt die Kapitel vom **Hauptweg**.
+
+Also:
+
+* das Zielkapitel
+* sein Vorgängerkapitel
+* dessen Vorgängerkapitel
+* und so weiter
+
+Wenn `compile_series = true` gesetzt ist, dann geht sie sogar über Romansprünge weiter zurück.
+
+---
+
+## Einfach gesagt
+
+Das ist der **Rückwärts-Läufer auf dem Hauptweg**.
+
+Er läuft den Hauptpfad zurück und merkt sich alle Kapitel, die wichtig sind.
+
+---
+
+## Bild im Kopf
+
+```text id="2up9aj"
+Kapitel 5  ← Kapitel 4 ← Kapitel 3 ← Kapitel 2 ← Kapitel 1
+   ^
+   |
+ Ziel
+
+Die Funktion läuft zurück und sammelt alles ein.
+```
+
+---
+
+## Aufruf
+
+```sql id="dvqctl"
+select *
+from public.get_relevant_mainflow_chapters(
+  p_chapter_id := 'KAPITEL_UUID',
+  p_compile_series := false
+);
+```
+
+---
+
+## Parameter
+
+### `p_chapter_id uuid`
+
+Das Kapitel, von dem aus rückwärts gesammelt wird.
+
+### `p_compile_series boolean default false`
+
+Sagt, ob nur innerhalb des Romans gesammelt werden soll oder auch über Vorgängerromane hinweg.
+
+#### Wenn `false`
+
+Nur im aktuellen Roman.
+
+#### Wenn `true`
+
+Auch frühere Romane, wenn sie über den Flow verbunden sind.
+
+---
+
+## Rückgabewerte
+
+### `chapter_id uuid`
+
+Die ID des gefundenen Kapitels.
+
+### `novel_id uuid`
+
+Der Roman dieses Kapitels.
+
+### `chapter_sort integer`
+
+Die Reihenfolge des Kapitels im Roman.
+
+### `depth integer`
+
+Wie weit das Kapitel vom Ziel entfernt ist.
+
+* `0` = Zielkapitel
+* `1` = direkter Vorgänger
+* `2` = davor
+* usw.
+
+---
+
+## Bild im Kopf
+
+```text id="6fcso9"
+depth 0 = das Kapitel, auf das du zeigst
+depth 1 = eins davor
+depth 2 = zwei davor
+depth 3 = drei davor
+```
+
+---
+
+# Funktion 3
+
+# `public.get_relevant_inflow_chapters`
+
+## Was sie macht
+
+Diese Funktion schaut auf die Mainflow-Kapitel und fragt:
+
+> Gibt es Seitenwege, die in diese Kapitel hineinlaufen?
+
+Wenn ja, sammelt sie diese Inflow-Kapitel.
+
+---
+
+## Einfach gesagt
+
+Das ist der **Seitenweg-Sammler**.
+
+---
+
+## Bild im Kopf
+
+```text id="0lh83v"
+Hauptweg:   Kapitel 2 → Kapitel 3 → Kapitel 4
+
+Seitenwege:
+             Kapitel X ─┐
+                        ├→ Kapitel 4
+             Kapitel Y ─┘
+```
+
+Die Funktion findet `Kapitel X` und `Kapitel Y`.
+
+---
+
+## Aufruf
+
+```sql id="0akbxt"
+select *
+from public.get_relevant_inflow_chapters(
+  p_chapter_id := 'KAPITEL_UUID',
+  p_compile_series := false,
+  p_required_only := false
+);
+```
+
+---
+
+## Parameter
+
+### `p_chapter_id uuid`
+
+Das Zielkapitel, von dem aus gedacht wird.
+
+### `p_compile_series boolean default false`
+
+Ob nur im Roman oder auch über frühere Romane hinweg gesammelt wird.
+
+### `p_required_only boolean default false`
+
+Ob nur inflows genommen werden sollen, die als „wichtig“ markiert sind.
+
+#### Wenn `false`
+
+Alle inflows.
+
+#### Wenn `true`
+
+Nur inflows mit `is_required = true`.
+
+---
+
+## Rückgabewerte
+
+### `owner_chapter_id uuid`
+
+Das Mainflow-Kapitel, zu dem dieser inflow gehört.
+
+### `inflow_chapter_id uuid`
+
+Das Kapitel des Seitenwegs.
+
+### `inflow_sort_order integer`
+
+Die Reihenfolge des inflows.
+
+### `is_required boolean`
+
+Ob dieser inflow als wichtig markiert ist.
+
+### `owner_depth integer`
+
+Wie weit das Mainflow-Kapitel vom Ziel entfernt ist.
+
+---
+
+## Bild im Kopf
+
+```text id="o7ttv5"
+owner_chapter_id = das Hauptkapitel
+inflow_chapter_id = der Seitenweg dazu
+```
+
+---
+
+# Funktion 4
+
+# `public.compile_story_context`
+
+## Was sie macht
+
+Das ist die **große Sammelfunktion**.
+
+Sie nimmt die Kapitel vom Hauptweg und die Kapitel von den Seitenwegen und packt deren Texte in vier saubere Blöcke.
+
+---
+
+## Einfach gesagt
+
+Das ist der **große Sortierkasten**.
+
+Er nimmt alles Relevante und sortiert es in:
+
+* Hauptweg Text
+* Hauptweg Zusammenfassung
+* Seitenweg Text
+* Seitenweg Zusammenfassung
+
+---
+
+## Bild im Kopf
+
+```text id="pxt9k6"
+                 +----------------------+
+                 | compile_story_context|
+                 +----------------------+
+                    /   /    \      \
+                   /   /      \      \
+                  v   v        v      v
+
+     mainflow_fulltext   mainflow_summaries
+     inflow_fulltext     inflow_summaries
+```
+
+---
+
+## Aufruf mit Kapitel
+
+```sql id="l8lwrv"
+select *
+from public.compile_story_context(
+  p_chapter_id := 'KAPITEL_UUID',
+  p_beat_id := null,
+  p_compile_series := false,
+  p_required_only := false,
+  p_full_text_limit := 12000,
+  p_summary_limit := 6000
+);
+```
+
+---
+
+## Aufruf mit Beat
+
+```sql id="51wi8l"
+select *
+from public.compile_story_context(
+  p_chapter_id := null,
+  p_beat_id := 'BEAT_UUID',
+  p_compile_series := false,
+  p_required_only := false,
+  p_full_text_limit := 12000,
+  p_summary_limit := 6000
+);
+```
+
+---
+
+## Parameter
+
+### `p_chapter_id uuid default null`
+
+Ein Zielkapitel.
+
+**Bedeutung:**
+Wenn du den Kontext für ein ganzes Kapitel haben willst.
+
+**Regel:**
+Das Zielkapitel wird vollständig aufgenommen.
+
+---
+
+### `p_beat_id uuid default null`
+
+Ein Zielbeat.
+
+**Bedeutung:**
+Wenn du den Kontext bis **vor** einen bestimmten Beat haben willst.
+
+**Regel:**
+Der Zielbeat selbst wird **nicht** aufgenommen.
+
+---
+
+### `p_compile_series boolean default false`
+
+Sagt, ob nur innerhalb des aktuellen Romans gesammelt werden soll oder auch über die Romanvorgänger hinweg.
+
+#### `false`
+
+Nur im aktuellen Buch.
+
+#### `true`
+
+Auch frühere flow-relevante Romane.
+
+---
+
+### `p_required_only boolean default false`
+
+Sagt, ob nur wichtige inflows gesammelt werden sollen.
+
+#### `false`
+
+Alle inflows.
+
+#### `true`
+
+Nur inflows mit `is_required = true`.
+
+---
+
+### `p_full_text_limit integer default 12000`
+
+Das Zeichenlimit für Volltext-Blöcke.
+
+Dieses Limit gilt getrennt für:
+
+* `mainflow_fulltext`
+* `inflow_fulltext`
+
+---
+
+### `p_summary_limit integer default 6000`
+
+Das Zeichenlimit für Summary-Blöcke.
+
+Dieses Limit gilt getrennt für:
+
+* `mainflow_summaries`
+* `inflow_summaries`
+
+---
+
+## Ganz wichtige Regeln
+
+### Wenn du einen Beat übergibst
+
+Dann wird gesammelt:
+
+* im Zielkapitel nur **bis vor den Beat**
+* nicht inklusive Beat
+
+### Wenn du ein Kapitel übergibst
+
+Dann wird gesammelt:
+
+* das Zielkapitel vollständig
+* plus die relevanten Vorgänger
+
+### Nur aktive Beats
+
+Für Volltext gelten nur Beats mit:
+
+```sql id="kqigdu"
+is_active = true
+```
+
+---
+
+## Rückgabewerte
+
+Die Funktion gibt genau **eine Zeile** mit diesen Feldern zurück.
+
+---
+
+### `mainflow_fulltext text`
+
+Die echten Beat-Texte des Hauptwegs.
+
+---
+
+### `mainflow_summaries text`
+
+Die Zusammenfassungen des Hauptwegs.
+
+Das sind:
+
+* Szenen-Summaries
+* Kapitel-Summaries
+
+---
+
+### `inflow_fulltext text`
+
+Die echten Beat-Texte der Inflows.
+
+---
+
+### `inflow_summaries text`
+
+Die Zusammenfassungen der Inflows.
+
+---
+
+### `mainflow_fulltext_truncated boolean`
+
+`true`, wenn der Hauptweg-Volltext wegen Limit abgeschnitten wurde.
+
+---
+
+### `mainflow_summaries_truncated boolean`
+
+`true`, wenn die Hauptweg-Summaries wegen Limit abgeschnitten wurden.
+
+---
+
+### `inflow_fulltext_truncated boolean`
+
+`true`, wenn der Inflow-Volltext wegen Limit abgeschnitten wurde.
+
+---
+
+### `inflow_summaries_truncated boolean`
+
+`true`, wenn die Inflow-Summaries wegen Limit abgeschnitten wurden.
+
+---
+
+# So sammelt `compile_story_context`
+
+## Für Mainflow Volltext
+
+Es nimmt:
+
+* `beats.draft_text`
+* nur wenn Text nicht leer ist
+* nur wenn `is_active = true`
+
+Sortierung:
+
+1. `scenes.sort_order`
+2. `beats.sort_order`
+
+---
+
+## Für Mainflow Summaries
+
+Es nimmt:
+
+* `scenes.summary`
+* `chapters.summary`
+
+---
+
+## Für Inflow Volltext
+
+Es nimmt dasselbe wie beim Mainflow Volltext, aber nur für die inflow-Kapitel.
+
+---
+
+## Für Inflow Summaries
+
+Es nimmt dasselbe wie beim Mainflow Summary-Block, aber nur für die inflow-Kapitel.
+
+---
+
+# So funktionieren die Limits
+
+Stell dir vor, jede Kiste hat eine maximale Größe.
+
+## Beispiel
+
+`mainflow_fulltext_limit = 12000`
+
+Wenn schon 11.500 Zeichen drin sind und der nächste Textblock 900 Zeichen lang wäre, dann passiert:
+
+* der Block wird **nicht mehr angehängt**
+* `mainflow_fulltext_truncated = true`
+
+So bleibt der Block sauber.
+
+---
+
+# Gesamtbild in sehr einfach
+
+```text id="16gw4o"
+1. Ziel finden
+   ↓
+2. Hauptweg sammeln
+   ↓
+3. Seitenwege sammeln
+   ↓
+4. Texte holen
+   ↓
+5. In 4 Kisten sortieren
+   ↓
+6. Auf Limits achten
+   ↓
+7. Alles zurückgeben
+```
+
+---
+
+# Wofür du die Funktionen benutzen kannst
+
+## 1. Für KI-Prompts
+
+Du kannst der KI sagen:
+
+* Hier ist der Hauptweg
+* hier sind die Seitenwege
+* hier sind die Zusammenfassungen
+* schreib jetzt weiter
+
+---
+
+## 2. Für Debugging
+
+Du kannst prüfen:
+
+* ob das richtige Kapitel eingesammelt wird
+* ob inflows korrekt auftauchen
+* ob der Beat-Schnitt korrekt funktioniert
+* ob Limits greifen
+
+---
+
+## 3. Für Kontextaufbau
+
+Du kannst verschiedene Blöcke später unterschiedlich in Prompts einbauen, zum Beispiel:
+
+* Mainflow zuerst
+* Inflows danach
+* Summaries zuletzt
+
+---
+
+# Wichtige Annahmen
+
+Diese Funktionen gehen davon aus, dass es in deiner Datenbank gibt:
+
+## Bei Beats
+
+* `beats.sort_order`
+* `beats.draft_text`
+* `beats.is_active`
+
+## Bei Szenen
+
+* `scenes.sort_order`
+* `scenes.summary`
+
+## Bei Kapiteln
+
+* `chapters.sort_order`
+* `chapters.summary`
+* `chapters.predecessor_chapter_id`
+* `chapters.is_standalone`
+
+## Bei Inflows
+
+* `chapter_inflows.chapter_id`
+* `chapter_inflows.inflow_chapter_id`
+* `chapter_inflows.sort_order`
+* `chapter_inflows.is_required`
+
+## Bei Romanen
+
+* `novels.predecessor_novel_id`
+* `novels.is_standalone`
+
+---
+
+# Bekannte Grenzen
+
+Auch wenn die Funktionen schon viel können, gibt es Dinge, die man später noch schöner machen kann.
+
+## 1. Doppelte inflows
+
+Ein inflow-Kapitel könnte theoretisch doppelt auftauchen, wenn es über mehrere Wege relevant wird.
+
+## 2. Keine Debug-Ausgabe der Kapitel-IDs
+
+Im Moment bekommst du nur die vier Textblöcke und die Truncated-Flags zurück, aber nicht die genaue Liste der verwendeten Kapitel.
+
+## 3. `scope_used` ist bewusst weggelassen
+
+Weil du gesagt hast, dass es gerade nicht gebraucht wird.
+
+---
+
+# Ganz kurze Mini-Zusammenfassung
+
+## `get_story_context_target`
+
+Findet das Ziel.
+
+## `get_relevant_mainflow_chapters`
+
+Findet die Kapitel vom Hauptweg.
+
+## `get_relevant_inflow_chapters`
+
+Findet die Kapitel von den Seitenwegen.
+
+## `compile_story_context`
+
+Sammelt die Texte und gibt sie hübsch sortiert zurück.
+
+---
+
+# Das wichtigste Bild zum Schluss
+
+```text id="v0crvq"
+Du sagst:
+"Ich bin HIER in meiner Geschichte."
+
+Die Funktionen sagen:
+"Okay.
+Dann holen wir dir:
+- den Hauptweg,
+- die Seitenwege,
+- die echten Texte,
+- die Zusammenfassungen,
+und packen alles ordentlich in Kisten."
+```
+
+Wenn du willst, mache ich dir daraus im nächsten Schritt noch eine **richtig hübsche Markdown-Doku mit Emojis, Kästchen und noch einfacheren Mini-Beispielen**.
