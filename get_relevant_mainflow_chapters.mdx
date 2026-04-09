@@ -1,0 +1,75 @@
+---
+title: get_relevant_mainflow_chapters
+---
+```typescript
+create or replace function public.get_relevant_mainflow_chapters(
+  p_chapter_id uuid,
+  p_compile_series boolean default false
+)
+returns table (
+  chapter_id uuid,
+  novel_id uuid,
+  chapter_sort integer,
+  depth integer
+)
+language plpgsql
+stable
+as $$
+declare
+  v_current_chapter_id uuid;
+  v_current_novel_id uuid;
+  v_pred_chapter_id uuid;
+  v_pred_novel_id uuid;
+  v_depth integer := 0;
+begin
+  v_current_chapter_id := p_chapter_id;
+
+  loop
+    select c.novel_id
+    into v_current_novel_id
+    from public.chapters c
+    where c.id = v_current_chapter_id;
+
+    if v_current_novel_id is null then
+      exit;
+    end if;
+
+    return query
+    select
+      c.id,
+      c.novel_id,
+      c.sort_order,
+      v_depth
+    from public.chapters c
+    where c.id = v_current_chapter_id;
+
+    v_pred_chapter_id := public.get_main_predecessor_chapter(v_current_chapter_id);
+
+    if v_pred_chapter_id is not null then
+      v_current_chapter_id := v_pred_chapter_id;
+      v_depth := v_depth + 1;
+      continue;
+    end if;
+
+    if not p_compile_series then
+      exit;
+    end if;
+
+    v_pred_novel_id := public.get_main_predecessor_novel(v_current_novel_id);
+
+    if v_pred_novel_id is null then
+      exit;
+    end if;
+
+    v_current_chapter_id := public.get_last_chapter_of_novel(v_pred_novel_id);
+
+    if v_current_chapter_id is null then
+      exit;
+    end if;
+
+    v_depth := v_depth + 1;
+  end loop;
+end;
+$$;
+```
+

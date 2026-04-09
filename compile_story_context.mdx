@@ -1,0 +1,233 @@
+---
+title: compile_story_context
+---
+```typescript
+create or replace function public.compile_story_context(
+  p_chapter_id uuid default null,
+  p_beat_id uuid default null,
+  p_compile_series boolean default false,
+  p_required_only boolean default false,
+  p_full_text_limit integer default 12000,
+  p_summary_limit integer default 6000
+)
+returns table (
+  mainflow_fulltext text,
+  mainflow_summaries text,
+  inflow_fulltext text,
+  inflow_summaries text,
+  mainflow_fulltext_truncated boolean,
+  mainflow_summaries_truncated boolean,
+  inflow_fulltext_truncated boolean,
+  inflow_summaries_truncated boolean
+)
+language plpgsql
+stable
+as $$
+declare
+  v_target record;
+  v_main record;
+  v_inflow record;
+
+  v_mainflow_fulltext text := '';
+  v_mainflow_summaries text := '';
+  v_inflow_fulltext text := '';
+  v_inflow_summaries text := '';
+
+  v_mainflow_fulltext_truncated boolean := false;
+  v_mainflow_summaries_truncated boolean := false;
+  v_inflow_fulltext_truncated boolean := false;
+  v_inflow_summaries_truncated boolean := false;
+
+  v_block text;
+begin
+  select *
+  into v_target
+  from public.get_story_context_target(p_chapter_id, p_beat_id);
+
+  -- =========================
+  -- MAINFLOW FULLTEXT
+  -- =========================
+  for v_main in
+    select *
+    from public.get_relevant_mainflow_chapters(v_target.chapter_id, p_compile_series)
+    order by depth desc, chapter_sort
+  loop
+    if v_target.target_mode = 'beat' and v_main.chapter_id = v_target.chapter_id then
+      select coalesce(string_agg(b.draft_text, E'\n\n' order by s.sort_order, b.sort_order), '')
+      into v_block
+      from public.scenes s
+      join public.beats b on b.scene_id = s.id
+      where s.chapter_id = v_main.chapter_id
+        and coalesce(b.is_active, true) = true
+        and nullif(btrim(coalesce(b.draft_text, '')), '') is not null
+        and (
+          s.sort_order < v_target.target_scene_sort
+          or (
+            s.sort_order = v_target.target_scene_sort
+            and b.sort_order < v_target.target_beat_sort
+          )
+        );
+    else
+      select coalesce(string_agg(b.draft_text, E'\n\n' order by s.sort_order, b.sort_order), '')
+      into v_block
+      from public.scenes s
+      join public.beats b on b.scene_id = s.id
+      where s.chapter_id = v_main.chapter_id
+        and coalesce(b.is_active, true) = true
+        and nullif(btrim(coalesce(b.draft_text, '')), '') is not null;
+    end if;
+
+    if nullif(v_block, '') is not null then
+      if char_length(v_mainflow_fulltext) + char_length(v_block) + 2 <= p_full_text_limit then
+        v_mainflow_fulltext :=
+          case
+            when v_mainflow_fulltext = '' then v_block
+            else v_mainflow_fulltext || E'\n\n' || v_block
+          end;
+      else
+        v_mainflow_fulltext_truncated := true;
+      end if;
+    end if;
+  end loop;
+
+  -- =========================
+  -- MAINFLOW SUMMARIES
+  -- =========================
+  for v_main in
+    select *
+    from public.get_relevant_mainflow_chapters(v_target.chapter_id, p_compile_series)
+    order by depth desc, chapter_sort
+  loop
+    select coalesce(string_agg(x.txt, E'\n\n' order by x.ord1, x.ord2), '')
+    into v_block
+    from (
+      select
+        1 as ord1,
+        s.sort_order as ord2,
+        s.summary as txt
+      from public.scenes s
+      where s.chapter_id = v_main.chapter_id
+        and nullif(btrim(coalesce(s.summary, '')), '') is not null
+        and (
+          v_target.target_mode <> 'beat'
+          or v_main.chapter_id <> v_target.chapter_id
+          or s.sort_order < v_target.target_scene_sort
+        )
+
+      union all
+
+      select
+        2 as ord1,
+        999999 as ord2,
+        c.summary as txt
+      from public.chapters c
+      where c.id = v_main.chapter_id
+        and nullif(btrim(coalesce(c.summary, '')), '') is not null
+        and v_target.target_mode <> 'beat'
+    ) x;
+
+    if nullif(v_block, '') is not null then
+      if char_length(v_mainflow_summaries) + char_length(v_block) + 2 <= p_summary_limit then
+        v_mainflow_summaries :=
+          case
+            when v_mainflow_summaries = '' then v_block
+            else v_mainflow_summaries || E'\n\n' || v_block
+          end;
+      else
+        v_mainflow_summaries_truncated := true;
+      end if;
+    end if;
+  end loop;
+
+  -- =========================
+  -- INFLOW FULLTEXT
+  -- =========================
+  for v_inflow in
+    select *
+    from public.get_relevant_inflow_chapters(
+      v_target.chapter_id,
+      p_compile_series,
+      p_required_only
+    )
+  loop
+    select coalesce(string_agg(b.draft_text, E'\n\n' order by s.sort_order, b.sort_order), '')
+    into v_block
+    from public.scenes s
+    join public.beats b on b.scene_id = s.id
+    where s.chapter_id = v_inflow.inflow_chapter_id
+      and coalesce(b.is_active, true) = true
+      and nullif(btrim(coalesce(b.draft_text, '')), '') is not null;
+
+    if nullif(v_block, '') is not null then
+      if char_length(v_inflow_fulltext) + char_length(v_block) + 2 <= p_full_text_limit then
+        v_inflow_fulltext :=
+          case
+            when v_inflow_fulltext = '' then v_block
+            else v_inflow_fulltext || E'\n\n' || v_block
+          end;
+      else
+        v_inflow_fulltext_truncated := true;
+      end if;
+    end if;
+  end loop;
+
+  -- =========================
+  -- INFLOW SUMMARIES
+  -- =========================
+  for v_inflow in
+    select *
+    from public.get_relevant_inflow_chapters(
+      v_target.chapter_id,
+      p_compile_series,
+      p_required_only
+    )
+  loop
+    select coalesce(string_agg(x.txt, E'\n\n' order by x.ord1, x.ord2), '')
+    into v_block
+    from (
+      select
+        1 as ord1,
+        s.sort_order as ord2,
+        s.summary as txt
+      from public.scenes s
+      where s.chapter_id = v_inflow.inflow_chapter_id
+        and nullif(btrim(coalesce(s.summary, '')), '') is not null
+
+      union all
+
+      select
+        2 as ord1,
+        999999 as ord2,
+        c.summary as txt
+      from public.chapters c
+      where c.id = v_inflow.inflow_chapter_id
+        and nullif(btrim(coalesce(c.summary, '')), '') is not null
+    ) x;
+
+    if nullif(v_block, '') is not null then
+      if char_length(v_inflow_summaries) + char_length(v_block) + 2 <= p_summary_limit then
+        v_inflow_summaries :=
+          case
+            when v_inflow_summaries = '' then v_block
+            else v_inflow_summaries || E'\n\n' || v_block
+          end;
+      else
+        v_inflow_summaries_truncated := true;
+      end if;
+    end if;
+  end loop;
+
+  return query
+  select
+    v_mainflow_fulltext,
+    v_mainflow_summaries,
+    v_inflow_fulltext,
+    v_inflow_summaries,
+    v_mainflow_fulltext_truncated,
+    v_mainflow_summaries_truncated,
+    v_inflow_fulltext_truncated,
+    v_inflow_summaries_truncated;
+end;
+$$;
+```
+

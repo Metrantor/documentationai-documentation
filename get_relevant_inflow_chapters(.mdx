@@ -1,0 +1,41 @@
+---
+title: get_relevant_inflow_chapters
+---
+```typescript
+create or replace function public.get_relevant_inflow_chapters(
+  p_chapter_id uuid,
+  p_compile_series boolean default false,
+  p_required_only boolean default false
+)
+returns table (
+  owner_chapter_id uuid,
+  inflow_chapter_id uuid,
+  inflow_sort_order integer,
+  is_required boolean,
+  owner_depth integer
+)
+language sql
+stable
+as $$
+  with mainflow as (
+    select *
+    from public.get_relevant_mainflow_chapters(p_chapter_id, p_compile_series)
+  )
+  select
+    mf.chapter_id as owner_chapter_id,
+    ci.inflow_chapter_id,
+    ci.sort_order as inflow_sort_order,
+    ci.is_required,
+    mf.depth as owner_depth
+  from mainflow mf
+  join public.chapter_inflows ci
+    on ci.chapter_id = mf.chapter_id
+  where
+    (not p_required_only or ci.is_required = true)
+  order by
+    mf.depth desc,
+    ci.sort_order,
+    ci.inflow_chapter_id;
+$$;
+```
+

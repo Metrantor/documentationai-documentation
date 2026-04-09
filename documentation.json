@@ -73,8 +73,20 @@
                     "group": "Story Context Aggregation",
                     "pages": [
                       {
+                        "title": "get_relevant_inflow_chapters(",
+                        "path": "get_relevant_inflow_chapters("
+                      },
+                      {
+                        "title": "compile_story_context",
+                        "path": "compile_story_context"
+                      },
+                      {
                         "title": "get_story_context_target",
                         "path": "get_story_context_target"
+                      },
+                      {
+                        "title": "get_relevant_mainflow_chapters",
+                        "path": "get_relevant_mainflow_chapters"
                       }
                     ]
                   },
