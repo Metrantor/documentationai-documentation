@@ -73,19 +73,19 @@
                     "group": "Codec Erstellung für Prompts",
                     "pages": [
                       {
-                        "title": "Auufruf und Ergebnisse",
-                        "path": "auufruf-und-ergebnisse"
+                        "title": "Beschreibung",
+                        "path": "beschreibung"
                       },
                       {
-                        "title": "Erklärung der Supabasefunktionen",
-                        "path": "erklrung-der-supabasefunktionen"
+                        "title": "Aufruf und Ergebnisse",
+                        "path": "auufruf-und-ergebnisse"
                       },
                       {
                         "title": "render_codex_payload",
                         "path": "hilffunktion"
                       },
                       {
-                        "title": "Coder erstellung für Propmt",
+                        "title": "build_full_codex_context_json",
                         "path": "coder-erstellung-fr-propmt"
                       }
                     ]

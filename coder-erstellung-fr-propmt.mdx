@@ -1,3 +1,7 @@
+---
+title: build_full_codex_context_json
+---
+```typescript
 create or replace function public.build_full_codex_context_json(
   p_beat_id uuid,
   p_text text
@@ -241,3 +245,5 @@ begin
   return v_result;
 end;
 $function$;
+```
+
