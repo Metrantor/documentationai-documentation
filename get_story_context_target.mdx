@@ -1,0 +1,71 @@
+---
+title: get_story_context_target
+---
+```typescript
+create or replace function public.get_story_context_target(
+  p_chapter_id uuid default null,
+  p_beat_id uuid default null
+)
+returns table (
+  target_mode text,
+  series_id uuid,
+  novel_id uuid,
+  chapter_id uuid,
+  beat_id uuid,
+  target_scene_sort integer,
+  target_beat_sort integer
+)
+language plpgsql
+stable
+as $$
+begin
+  if (p_chapter_id is null and p_beat_id is null)
+     or (p_chapter_id is not null and p_beat_id is not null) then
+    raise exception 'Bitte genau einen Parameter setzen: p_chapter_id ODER p_beat_id';
+  end if;
+
+  if p_chapter_id is not null then
+    return query
+    select
+      'chapter'::text as target_mode,
+      sr.id as series_id,
+      n.id as novel_id,
+      c.id as chapter_id,
+      null::uuid as beat_id,
+      null::integer as target_scene_sort,
+      null::integer as target_beat_sort
+    from public.chapters c
+    join public.novels n on n.id = c.novel_id
+    join public.series sr on sr.id = n.series_id
+    where c.id = p_chapter_id;
+
+    if not found then
+      raise exception 'Kapitel % wurde nicht gefunden', p_chapter_id;
+    end if;
+
+    return;
+  end if;
+
+  return query
+  select
+    'beat'::text as target_mode,
+    sr.id as series_id,
+    n.id as novel_id,
+    c.id as chapter_id,
+    b.id as beat_id,
+    s.sort_order as target_scene_sort,
+    b.sort_order as target_beat_sort
+  from public.beats b
+  join public.scenes s on s.id = b.scene_id
+  join public.chapters c on c.id = s.chapter_id
+  join public.novels n on n.id = c.novel_id
+  join public.series sr on sr.id = n.series_id
+  where b.id = p_beat_id;
+
+  if not found then
+    raise exception 'Beat % wurde nicht gefunden', p_beat_id;
+  end if;
+end;
+$$;
+```
+

@@ -70,7 +70,16 @@
                 "group": "Anwendungs-Oberfläche",
                 "pages": [
                   {
-                    "group": "Codec Erstellung für Prompts",
+                    "group": "Story Context Aggregation",
+                    "pages": [
+                      {
+                        "title": "get_story_context_target",
+                        "path": "get_story_context_target"
+                      }
+                    ]
+                  },
+                  {
+                    "group": "Codex Erstellung für Prompts",
                     "pages": [
                       {
                         "title": "Beschreibung",
@@ -114,6 +123,10 @@
                   {
                     "group": "Story Flow",
                     "pages": [
+                      {
+                        "title": "Flow für Prompt aufbereiten",
+                        "path": "flow-fr-prompt-aufbereiten"
+                      },
                       {
                         "title": "Story Flow im Kapitel",
                         "path": "story-flow-im-kapitel"
@@ -161,6 +174,15 @@
                   {
                     "group": "Seiten",
                     "pages": []
+                  }
+                ]
+              },
+              {
+                "group": "Prompts",
+                "pages": [
+                  {
+                    "title": "Inhalte eines Prompts",
+                    "path": "inhalte-eines-prompts"
                   }
                 ]
               }
