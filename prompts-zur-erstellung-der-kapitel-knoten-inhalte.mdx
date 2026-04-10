@@ -1,0 +1,121 @@
+```typescript wrap="true"
+füge bitte in einem Chapter Node ein button direkt über der Liste der Entwürfe ein: Entwurf erzeugen. dieser button ist nur aktiv, wenn das Feld Idee wirklich (also trim() anwenden) einen Text enthält
+
+Wenn der Nutzer auf den button drückt, so sammle die Informationen der eingehenden Knoten an der drei Eingängen des Kapitel Knotens ein.
+
+Am Eingangsknoten für Ideen sammle alle Informationen in einer json-struktur ein:
+
+Ideen, nimm den text
+Codex, nimm den text
+
+Summary-Ausgänge von Kapiteln, nimm das Feld Synopsis
+Story-Flow-Ausgänge von Kapiteln, nimm des Inhalt des dort ausgewählten Drafts
+
+
+Wenn Daten über Codex-Einträge kommen (das können auch Nincht-Kodex-Knten sein!)
+Sammle sie in dem Json array "codex"
+
+Wenn Daten über Ideen-Einträge kommen (das können auch Nincht-Kodex-Knten sein!)
+Sammle sie in dem Json array "Ideas"
+
+Wenn Daten über Story-Flow-kommen (das können auch Nincht-Kodex-Knoten sein!)
+Sammle sie in dem Json array "Story-Flow" (je nachdem ob es sich um die Synopsis oder Story-Flow-out handelt)
+
+
+Dann ermittle den wert prompt und schreibe ihn in den json Bereich "prompt"
+
+Dann ermittle den wert idee und schreibe ihn in den json Bereich "seedt"
+
+
+übergib die werte in einzelnen Parametern and die mit POST auszrufene Funktion: https://casper001.duckdns.org/webhook/CreateChapterDraft
+
+Zeige dann einen kleinen Wartedialog mit animation an, dass ein Entwurf des Kapitels erzeugt wird.
+
+Wenn der Prozess abgeschlossen ist, wirst dann ein json objekt zurückerhalten, das ein Feld Text enthält. dies bitte nutzen, um dem Kapitel einen neuen Entwurfseintrag hinzufügen. dann bitte den Wartedialog schließen.
+```
+
+```typescript
+füge bitte in einem Chapter Node ein button direkt über der Liste der Szenen ein: Szenen entwickeln. dieser button ist nur aktiv, wenn ein Draft ausgewählt und das Feld Idee wirklich (also trim() anwenden) einen Text enthält
+
+Wenn der Nutzer auf den button drückt, so sammle die Informationen der eingehenden Knoten an der drei Eingängen des Kapitel Knotens ein.
+
+Am Eingangsknoten für Ideen sammle alle Informationen in einer json-struktur ein:
+
+Ideen, nimm den text
+Codex, nimm den text
+
+Summary-Ausgänge von Kapiteln, nimm das Feld Synopsis
+Story-Flow-Ausgänge von Kapiteln, nimm des Inhalt des dort ausgewählten Drafts
+
+
+Wenn Daten über Codex-Einträge kommen (das können auch Nicht-Kodex-Knten sein!)
+Sammle sie in dem Json array "codex"
+
+Wenn Daten über Ideen-Einträge kommen (das können auch Nicht-Kodex-Knten sein!)
+Sammle sie in dem Json array "Ideas"
+
+Wenn Daten über Story-Flow-kommen (das können auch Nincht-Kodex-Knoten sein!)
+Sammle sie in dem Json array "Story-Flow" (je nachdem ob es sich um die Synopsis oder Story-Flow-out handelt)
+
+
+Dann ermittle den wert prompt und schreibe ihn in den json Bereich "prompt"
+
+Dann ermittle den wert idee und schreibe ihn in den json Bereich "seed"
+
+Besitzt das Kapitel bereits Szenen, so frage den Nutzer ob er diese wirklich ersetzen möchte.
+
+übergib die werte in einzelnen Parametern and die mit POST auszrufene Funktion: https://casper001.duckdns.org/webhook/DevelopScenes
+
+Zeige dann einen kleinen Wartedialog mit animation an, dass die Szenen entwickelt werden.
+
+Wenn der Prozess abgeschlossen ist, wirst dann ein json objekt zurückerhalten, das ein Objekt-Array von von Text_enthält: {{ [
+  { text: "Hallo" },
+  { text: "Hallo" },
+  { text: "Hallo" },
+  { text: "Hallo" }
+] }}. dies bitte nutzen, um die Szenen des Kapitels zu ersetzen. dann bitte den Wartedialog schließen.
+```
+
+```typescript
+füge bitte in einem Chapter Node ein button direkt über dem Textfeld der Synopsis: Synopsis erstellen. dieser button ist nur aktiv, wenn ein Szenen existieren, ein Draft ausgewählt und das Feld Idee wirklich (also trim() anwenden) einen Text enthält
+
+Wenn der Nutzer auf den button drückt, so sammle die Informationen der eingehenden Knoten an der drei Eingängen des Kapitel Knotens ein.
+
+Am Eingangsknoten für Ideen sammle alle Informationen in einer json-struktur ein:
+
+Ideen, nimm den text
+Codex, nimm den text
+
+Summary-Ausgänge von Kapiteln, nimm das Feld Synopsis
+Story-Flow-Ausgänge von Kapiteln, nimm des Inhalt des dort ausgewählten Drafts
+
+
+Wenn Daten über Codex-Einträge kommen (das können auch Nicht-Kodex-Knoten sein!)
+Sammle sie in dem Json array "codex"
+
+Wenn Daten über Ideen-Einträge kommen (das können auch Nicht-Kodex-Knoten sein!)
+Sammle sie in dem Json array "Ideas"
+
+Wenn Daten über Story-Flow-kommen (das können auch Nicht-Kodex-Knoten sein!)
+Sammle sie in dem Json array "Story-Flow" (je nachdem ob es sich um die Synopsis oder Story-Flow-out handelt)
+
+
+Dann ermittle den wert prompt und schreibe ihn in den json Bereich "prompt"
+
+Dann ermittle den wert des ausgewählten drafts und schreibe ihn in den json Bereich "draft"
+
+Dann ermittle die liste der Szenen und schreibe sie in den json Bereich "scenes"
+
+
+Dann ermittle den wert idee und schreibe ihn in den json Bereich "seed"
+
+Besitzt das Kapitel bereits eine nicht leere Synopsis (nutze trim()), so frage den Nutzer ob er diese wirklich ersetzen möchte.
+
+übergib die werte in einzelnen Parametern and die mit POST auszrufene Funktion: https://casper001.duckdns.org/webhook/CreateSynopsis
+
+Zeige dann einen kleinen Wartedialog mit animation an, dass die Synopsis erstellt wird.
+
+Wenn der Prozess abgeschlossen ist, wirst dann ein json objekt zurückerhalten, das ein Feld Text enthält. dies bitte nutzen, un in das Feld Synopsis des Kapitels übernehmen. dann bitte den Wartedialog schließen.
+
+```
+

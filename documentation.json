@@ -70,6 +70,15 @@
                 "group": "Anwendungs-Oberfläche",
                 "pages": [
                   {
+                    "group": "Aura Canvas",
+                    "pages": [
+                      {
+                        "title": "Prompts zur Erstellung der Kapitel-Knoten-Inhalte",
+                        "path": "prompts-zur-erstellung-der-kapitel-knoten-inhalte"
+                      }
+                    ]
+                  },
+                  {
                     "group": "Story Context Aggregation",
                     "pages": [
                       {
