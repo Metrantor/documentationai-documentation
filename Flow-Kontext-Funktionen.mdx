@@ -1,0 +1,527 @@
+---
+title: 'Übersicht: Flow-Kontext-Funktionen '
+---
+# Cheat Sheet
+
+## Flow-Kontext-Funktionen für `compile_story_context`
+
+---
+
+# Schnellüberblick
+
+| Funktion                         | Aufgabe                   |
+| -------------------------------- | ------------------------- |
+| `get_story_context_target`       | findet den Zielpunkt      |
+| `get_relevant_mainflow_chapters` | sammelt Hauptweg-Kapitel  |
+| `get_relevant_inflow_chapters`   | sammelt Inflow-Kapitel    |
+| `get_relevant_mainflow_novels`   | sammelt relevante Romane  |
+| `compile_story_context`          | baut den fertigen Kontext |
+
+---
+
+# 1. `get_story_context_target`
+
+## Zweck
+
+Bestimmt, **wo** du dich in der Story befindest.
+
+## Eingabe
+
+- `p_chapter_id`
+
+- oder `p_beat_id`
+
+## Wichtig
+
+Genau **einer** von beiden muss gesetzt sein.
+
+## Rückgabe
+
+- `target_mode`
+
+- `series_id`
+
+- `novel_id`
+
+- `chapter_id`
+
+- `beat_id`
+
+- `target_scene_sort`
+
+- `target_beat_sort`
+
+## Merksatz
+
+> „Sag mir erst mal, worauf du zeigst.“
+
+## Beispiel
+
+```typescript
+select *
+from public.get_story_context_target(
+  p_chapter_id := null,
+  p_beat_id := 'BEAT_UUID'
+);
+
+```
+
+---
+
+# 2. `get_relevant_mainflow_chapters`
+
+## Zweck
+
+Sammelt die Kapitel auf dem **Hauptweg** rückwärts vom Ziel aus.
+
+## Eingabe
+
+- `p_chapter_id`
+
+- `p_compile_series`
+
+## Rückgabe
+
+- `chapter_id`
+
+- `novel_id`
+
+- `chapter_sort`
+
+- `depth`
+
+## `depth`
+
+- `0` = Zielkapitel
+
+- `1` = Vorgänger
+
+- `2` = davor
+
+- usw.
+
+## Merksatz
+
+> „Lauf den normalen Storyweg zurück.“
+
+## Beispiel
+
+```typescript
+select *
+from public.get_relevant_mainflow_chapters(
+  p_chapter_id := 'CHAPTER_UUID',
+  p_compile_series := true
+);
+
+```
+
+---
+
+# 3. `get_relevant_inflow_chapters`
+
+## Zweck
+
+Sammelt die **Seitenwege**, die in die Mainflow-Kapitel hineinlaufen.
+
+## Eingabe
+
+- `p_chapter_id`
+
+- `p_compile_series`
+
+- `p_required_only`
+
+## Rückgabe
+
+- `owner_chapter_id`
+
+- `inflow_chapter_id`
+
+- `inflow_sort_order`
+
+- `is_required`
+
+- `owner_depth`
+
+## Merksatz
+
+> „Welche Seitenstraßen münden in meinen Hauptweg?“
+
+## Beispiel
+
+```typescript
+select *
+from public.get_relevant_inflow_chapters(
+  p_chapter_id := 'CHAPTER_UUID',
+  p_compile_series := true,
+  p_required_only := true
+);
+
+```
+
+---
+
+# 4. `get_relevant_mainflow_novels`
+
+## Zweck
+
+Sammelt die relevanten Romane im **Roman-Hauptfluss**.
+
+## Eingabe
+
+- `p_novel_id`
+
+- `p_compile_series`
+
+## Rückgabe
+
+- `novel_id`
+
+- `novel_sort`
+
+- `depth`
+
+## Merksatz
+
+> „Welche früheren Romane gehören logisch dazu?“
+
+## Beispiel
+
+```typescript
+select *
+from public.get_relevant_mainflow_novels(
+  p_novel_id := 'NOVEL_UUID',
+  p_compile_series := true
+);
+
+```
+
+---
+
+# 5. `compile_story_context`
+
+## Zweck
+
+Baut den fertigen Kontextblock für die KI oder Analyse.
+
+## Eingabe
+
+- `p_chapter_id`
+
+- oder `p_beat_id`
+
+- `p_compile_series`
+
+- `p_required_only`
+
+- `p_novel_summary_mode`
+
+- `p_full_text_limit`
+
+- `p_summary_limit`
+
+## Rückgabe
+
+- `mainflow_fulltext`
+
+- `mainflow_summaries`
+
+- `inflow_fulltext`
+
+- `inflow_summaries`
+
+- `novel_summaries`
+
+- `mainflow_fulltext_truncated`
+
+- `mainflow_summaries_truncated`
+
+- `inflow_fulltext_truncated`
+
+- `inflow_summaries_truncated`
+
+- `novel_summaries_truncated`
+
+---
+
+# `compile_story_context` – wichtigste Regeln
+
+## Bei `p_chapter_id`
+
+- Zielkapitel wird **vollständig** aufgenommen
+
+## Bei `p_beat_id`
+
+- nur Inhalte **vor dem Beat**
+
+- Zielbeat selbst **nicht**
+
+## Nur aktive Beats
+
+Volltext nutzt nur:
+
+- `beats.is_active = true`
+
+## Reihenfolge
+
+### Innerhalb Kapitel
+
+- `scenes.sort_order`
+
+- `beats.sort_order`
+
+### Inflows
+
+- `chapter_inflows.sort_order`
+
+### Mainflow
+
+- entlang des Storyflows
+
+---
+
+# `p_novel_summary_mode`
+
+| Wert                | Bedeutung                         |
+| ------------------- | --------------------------------- |
+| `'none'`            | keine Roman-Summaries             |
+| `'previous_only'`   | nur Vorgängerromane               |
+| `'include_current'` | aktueller Roman + Vorgängerromane |
+
+## Merksatz
+
+> „Wie viel Romanwissen darf mit in den Kontext?“
+
+---
+
+# Standardaufrufe
+
+## Kapitel-Kontext
+
+```typescript
+select *
+from public.compile_story_context(
+  p_chapter_id := 'CHAPTER_UUID',
+  p_beat_id := null,
+  p_compile_series := false,
+  p_required_only := false,
+  p_novel_summary_mode := 'none',
+  p_full_text_limit := 12000,
+  p_summary_limit := 6000
+);
+
+```
+
+## Beat-Kontext
+
+```typescript
+select *
+from public.compile_story_context(
+  p_chapter_id := null,
+  p_beat_id := 'BEAT_UUID',
+  p_compile_series := false,
+  p_required_only := false,
+  p_novel_summary_mode := 'none',
+  p_full_text_limit := 12000,
+  p_summary_limit := 6000
+);
+
+```
+
+## Serienweiter, spoilerarmer Kontext
+
+```typescript
+select *
+from public.compile_story_context(
+  p_chapter_id := null,
+  p_beat_id := 'BEAT_UUID',
+  p_compile_series := true,
+  p_required_only := true,
+  p_novel_summary_mode := 'previous_only',
+  p_full_text_limit := 16000,
+  p_summary_limit := 9000
+);
+
+```
+
+---
+
+# Limits
+
+## `p_full_text_limit`
+
+Gilt getrennt für:
+
+- Mainflow Volltext
+
+- Inflow Volltext
+
+## `p_summary_limit`
+
+Gilt getrennt für:
+
+- Mainflow Summaries
+
+- Inflow Summaries
+
+- Novel Summaries
+
+## Verhalten
+
+Wenn der nächste Block das Limit überschreiten würde:
+
+- Block wird **nicht mehr angehängt**
+
+- Truncated-Flag wird `true`
+
+---
+
+# Truncated-Flags lesen
+
+| Feld                           | Bedeutung                               |
+| ------------------------------ | --------------------------------------- |
+| `mainflow_fulltext_truncated`  | Hauptweg-Volltext wurde abgeschnitten   |
+| `mainflow_summaries_truncated` | Hauptweg-Summaries wurden abgeschnitten |
+| `inflow_fulltext_truncated`    | Inflow-Volltext wurde abgeschnitten     |
+| `inflow_summaries_truncated`   | Inflow-Summaries wurden abgeschnitten   |
+| `novel_summaries_truncated`    | Roman-Summaries wurden abgeschnitten    |
+
+---
+
+# Debug-Reihenfolge bei Problemen
+
+## 1. Zielpunkt prüfen
+
+```typescript
+select *
+from public.get_story_context_target(
+  p_chapter_id := null,
+  p_beat_id := 'BEAT_UUID'
+);
+
+```
+
+## 2. Mainflow prüfen
+
+```typescript
+select *
+from public.get_relevant_mainflow_chapters(
+  p_chapter_id := 'CHAPTER_UUID',
+  p_compile_series := true
+);
+
+```
+
+## 3. Inflows prüfen
+
+```typescript
+select *
+from public.get_relevant_inflow_chapters(
+  p_chapter_id := 'CHAPTER_UUID',
+  p_compile_series := true,
+  p_required_only := false
+);
+
+```
+
+## 4. Romane prüfen
+
+```typescript
+select *
+from public.get_relevant_mainflow_novels(
+  p_novel_id := 'NOVEL_UUID',
+  p_compile_series := true
+);
+
+```
+
+## 5. Endgültigen Compiler prüfen
+
+```typescript
+select *
+from public.compile_story_context(
+  p_chapter_id := 'CHAPTER_UUID',
+  p_beat_id := null,
+  p_compile_series := true,
+  p_required_only := false,
+  p_novel_summary_mode := 'previous_only',
+  p_full_text_limit := 12000,
+  p_summary_limit := 6000
+);
+
+```
+
+---
+
+# Mini-Merksätze
+
+## `get_story_context_target`
+
+> Wo bin ich?
+
+## `get_relevant_mainflow_chapters`
+
+> Welche Hauptkapitel zählen?
+
+## `get_relevant_inflow_chapters`
+
+> Welche Seitenwege zählen?
+
+## `get_relevant_mainflow_novels`
+
+> Welche Romane davor zählen?
+
+## `compile_story_context`
+
+> Bau mir daraus einen sauberen Kontext.
+
+---
+
+# Empfohlene Defaults
+
+Für spoilerarmen KI-Kontext:
+
+```typescript
+p_compile_series      = true
+p_required_only       = true
+p_novel_summary_mode  = 'previous_only'
+p_full_text_limit     = 12000 bis 16000
+p_summary_limit       = 6000 bis 9000
+
+```
+
+---
+
+# Kurzfazit
+
+Wenn du schnell arbeiten willst, reicht dieses Muster:
+
+## Kapitelbasiert
+
+```typescript
+select *
+from public.compile_story_context(
+  p_chapter_id := 'CHAPTER_UUID',
+  p_beat_id := null,
+  p_compile_series := true,
+  p_required_only := true,
+  p_novel_summary_mode := 'previous_only'
+);
+
+```
+
+## Beatbasiert
+
+```typescript
+select *
+from public.compile_story_context(
+  p_chapter_id := null,
+  p_beat_id := 'BEAT_UUID',
+  p_compile_series := true,
+  p_required_only := true,
+  p_novel_summary_mode := 'previous_only'
+);
+
+```
+
+Wenn du willst, mache ich dir als Nächstes noch ein **Cheat Sheet nur für die Story-State-Funktionen** im exakt gleichen Stil.

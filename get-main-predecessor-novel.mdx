@@ -1,0 +1,94 @@
+---
+title: get_main_predecessor_novel
+---
+## Zweck
+
+Diese Funktion ermittelt den **Hauptvorgänger eines Romans**.
+
+Sie beantwortet also die Frage:
+
+> Welcher Roman liegt im normalen Storyflow direkt vor diesem Roman?
+
+## Logik
+
+Die Funktion prüft in dieser Reihenfolge:
+
+1. Gibt es den Roman überhaupt?
+
+2. Ist der Roman als `is_standalone = true` markiert?
+
+   - dann gibt es **keinen** Vorgänger
+
+3. Ist `predecessor_novel_id` gesetzt?
+
+   - dann ist **dieser Roman** der Vorgänger
+
+4. Sonst:
+
+   - nimm in derselben Serie den Roman mit der nächstkleineren `sort_order`
+
+## Parameter
+
+### `p_novel_id uuid`
+
+Die ID des Romans, dessen Hauptvorgänger gesucht wird.
+
+## Rückgabe
+
+### `uuid`
+
+- die Roman-ID des Hauptvorgängers
+
+- oder `null`, wenn es keinen gibt
+
+# SQL
+
+```typescript
+create or replace function public.get_main_predecessor_novel(
+  p_novel_id uuid
+)
+returns uuid
+language plpgsql
+stable
+as $$
+declare
+  v_novel record;
+  v_pred uuid;
+begin
+  select
+    n.id,
+    n.series_id,
+    n.sort_order,
+    n.predecessor_novel_id,
+    n.is_standalone
+  into v_novel
+  from public.novels n
+  where n.id = p_novel_id;
+
+  if not found then
+    return null;
+  end if;
+
+  if coalesce(v_novel.is_standalone, false) = true then
+    return null;
+  end if;
+
+  if v_novel.predecessor_novel_id is not null then
+    return v_novel.predecessor_novel_id;
+  end if;
+
+  select n2.id
+  into v_pred
+  from public.novels n2
+  where n2.series_id = v_novel.series_id
+    and n2.sort_order < v_novel.sort_order
+  order by n2.sort_order desc
+  limit 1;
+
+  return v_pred;
+end;
+$$;
+```
+
+
+

@@ -1,0 +1,222 @@
+---
+title: story_context_target
+---
+## Was die Funktion macht
+
+Diese Funktion bestimmt den **Zielpunkt** der Kontextberechnung.
+
+Einfach gesagt:
+
+> Sie klärt zuerst, worauf du überhaupt zeigst.
+
+Also:
+
+- auf ein Kapitel?
+
+- auf einen Beat?
+
+- in welchem Roman?
+
+- in welcher Serie?
+
+- in welcher Szene?
+
+---
+
+## Wofür die Funktion gut ist
+
+Sie ist der Einstiegspunkt für fast alle weiteren Kontextfunktionen.
+
+Ohne sie weiß das System noch gar nicht:
+
+- wo der Zielpunkt liegt
+
+- ob Kapitelmodus oder Beatmodus aktiv ist
+
+- wo ein Beat innerhalb seines Kapitels sitzt
+
+---
+
+## Welche Parameter sie hat
+
+### `p_chapter_id uuid default null`
+
+Die ID eines Zielkapitels.
+
+---
+
+### `p_beat_id uuid default null`
+
+Die ID eines Zielbeats.
+
+---
+
+## Wichtige Regel
+
+Es muss **genau einer** gesetzt sein:
+
+- entweder Kapitel
+
+- oder Beat
+
+Nicht beide.\
+Nicht keiner.
+
+---
+
+## Was die Funktion zurückgibt
+
+### `target_mode text`
+
+- `'chapter'`
+
+- oder `'beat'`
+
+---
+
+### `series_id uuid`
+
+Die Serie, zu der das Ziel gehört.
+
+### `novel_id uuid`
+
+Der Roman, zu dem das Ziel gehört.
+
+### `chapter_id uuid`
+
+Das Kapitel des Zielpunkts.
+
+### `beat_id uuid`
+
+Der Beat des Zielpunkts, wenn ein Beat übergeben wurde.
+
+### `target_scene_sort integer`
+
+Die Szenenreihenfolge des Zielbeats.
+
+### `target_beat_sort integer`
+
+Die Beat-Reihenfolge des Zielbeats.
+
+---
+
+## Aufruf mit Kapitel
+
+```typescript
+select *
+from public.get_story_context_target(
+  p_chapter_id := '33333333-3333-3333-3333-333333333333',
+  p_beat_id := null
+);
+```
+
+### Bedeutung
+
+> „Ich möchte den Kontext für dieses Kapitel.“
+
+---
+
+## Aufruf mit Beat
+
+```typescript
+select *
+from public.get_story_context_target(
+  p_chapter_id := null,
+  p_beat_id := '44444444-4444-4444-4444-444444444444'
+);
+```
+
+### Bedeutung
+
+> „Ich möchte den Kontext bis vor diesen Beat.“
+
+---
+
+## Beispiel einer Rückgabe
+
+```typescript
+target_mode  series_id   novel_id   chapter_id   beat_id    target_scene_sort  target_beat_sort
+----------   ---------   --------   ----------   -------    -----------------  ----------------
+beat         ser1-...    rom3-...   kap5-...     beat9-...  3                  2
+```
+
+### Das bedeutet
+
+- &#x20;Ziel ist ein Beat&#x20;
+
+- &#x20;er liegt in Roman 3, Kapitel 5&#x20;
+
+- &#x20;in Szene 3&#x20;
+
+- &#x20;und ist dort Beat 2&#x20;
+
+# SQL
+
+```typescript
+create or replace function public.get_story_context_target(
+  p_chapter_id uuid default null,
+  p_beat_id uuid default null
+)
+returns table (
+  target_mode text,
+  series_id uuid,
+  novel_id uuid,
+  chapter_id uuid,
+  beat_id uuid,
+  target_scene_sort integer,
+  target_beat_sort integer
+)
+language plpgsql
+stable
+as $$
+begin
+  if (p_chapter_id is null and p_beat_id is null)
+     or (p_chapter_id is not null and p_beat_id is not null) then
+    raise exception 'Bitte genau einen Parameter setzen: p_chapter_id ODER p_beat_id';
+  end if;
+
+  if p_chapter_id is not null then
+    return query
+    select
+      'chapter'::text as target_mode,
+      sr.id as series_id,
+      n.id as novel_id,
+      c.id as chapter_id,
+      null::uuid as beat_id,
+      null::integer as target_scene_sort,
+      null::integer as target_beat_sort
+    from public.chapters c
+    join public.novels n on n.id = c.novel_id
+    join public.series sr on sr.id = n.series_id
+    where c.id = p_chapter_id;
+
+    if not found then
+      raise exception 'Kapitel % wurde nicht gefunden', p_chapter_id;
+    end if;
+
+    return;
+  end if;
+
+  return query
+  select
+    'beat'::text as target_mode,
+    sr.id as series_id,
+    n.id as novel_id,
+    c.id as chapter_id,
+    b.id as beat_id,
+    s.sort_order as target_scene_sort,
+    b.sort_order as target_beat_sort
+  from public.beats b
+  join public.scenes s on s.id = b.scene_id
+  join public.chapters c on c.id = s.chapter_id
+  join public.novels n on n.id = c.novel_id
+  join public.series sr on sr.id = n.series_id
+  where b.id = p_beat_id;
+
+  if not found then
+    raise exception 'Beat % wurde nicht gefunden', p_beat_id;
+  end if;
+end;
+$$;
+```
+

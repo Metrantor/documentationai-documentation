@@ -1,0 +1,155 @@
+---
+title: get_relevant_mainflow_novels
+---
+## Was die Funktion macht
+
+Diese Funktion sammelt die **relevanten Romane im Hauptfluss**.
+
+Einfach gesagt:
+
+> Sie läuft auf Romanebene rückwärts.
+
+---
+
+## Wofür die Funktion gut ist
+
+Sie wird gebraucht, wenn du Roman-Summaries sammeln willst.
+
+Zum Beispiel:
+
+- nur frühere Romane
+
+- oder auch den aktuellen Roman
+
+- aber nur entlang des echten Roman-Flowpfads
+
+---
+
+## Welche Parameter sie hat
+
+### `p_novel_id uuid`
+
+Der Zielroman.
+
+---
+
+### `p_compile_series boolean default false`
+
+Steuert, ob über Vorgängerromane zurückgelaufen wird.
+
+#### Wenn `false`
+
+Nur der aktuelle Roman.
+
+#### Wenn `true`
+
+Auch alle flow-relevanten Vorgängerromane.
+
+---
+
+## Was die Funktion zurückgibt
+
+### `novel_id uuid`
+
+Die ID des Romans.
+
+### `novel_sort integer`
+
+Die Reihenfolge des Romans in der Serie.
+
+### `depth integer`
+
+Wie weit der Roman vom Zielroman entfernt ist.
+
+- `0` = Zielroman
+
+- `1` = direkter Vorgänger
+
+- `2` = davor
+
+- usw.
+
+---
+
+## Aufruf
+
+```typescript
+select *
+from public.get_relevant_mainflow_novels(
+  p_novel_id := '55555555-5555-5555-5555-555555555555',
+  p_compile_series := true
+);
+```
+
+### Bedeutung
+
+> „Zeig mir die flow-relevanten Romane vor diesem Roman.“
+
+---
+
+## Beispiel einer Rückgabe
+
+```typescript
+novel_id                                 novel_sort  depth
+------------------------------------     ----------  -----
+rom3-...                                 3           0
+rom2-...                                 2           1
+rom1-...                                 1           2
+```
+
+### Das bedeutet
+
+- &#x20;Zielroman ist Roman 3&#x20;
+
+- &#x20;davor liegt Roman 2&#x20;
+
+- &#x20;davor liegt Roman 1
+
+# SQL
+
+```typescript wrap="true"
+create or replace function public.get_relevant_mainflow_novels(
+  p_novel_id uuid,
+  p_compile_series boolean default false
+)
+returns table (
+  novel_id uuid,
+  novel_sort integer,
+  depth integer
+)
+language plpgsql
+stable
+as $$
+declare
+  v_current_novel_id uuid;
+  v_pred_novel_id uuid;
+  v_depth integer := 0;
+begin
+  v_current_novel_id := p_novel_id;
+
+  loop
+    return query
+    select
+      n.id,
+      n.sort_order,
+      v_depth
+    from public.novels n
+    where n.id = v_current_novel_id;
+
+    if not p_compile_series then
+      exit;
+    end if;
+
+    v_pred_novel_id := public.get_main_predecessor_novel(v_current_novel_id);
+
+    if v_pred_novel_id is null then
+      exit;
+    end if;
+
+    v_current_novel_id := v_pred_novel_id;
+    v_depth := v_depth + 1;
+  end loop;
+end;
+$$;
+```
+

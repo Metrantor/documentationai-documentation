@@ -1,0 +1,47 @@
+---
+title: get_last_chapter_of_novel
+---
+## Zweck
+
+Diese Funktion liefert das **letzte Kapitel eines Romans**.
+
+Sie beantwortet also die Frage:
+
+> Welches Kapitel steht im Roman ganz am Ende?
+
+## Logik
+
+Die Funktion sucht im angegebenen Roman das Kapitel mit der **höchsten&#x20;**`sort_order`.
+
+## Parameter
+
+### `p_novel_id uuid`
+
+Die ID des Romans.
+
+## Rückgabe
+
+### `uuid`
+
+- die Kapitel-ID des letzten Kapitels
+
+- oder `null`, wenn der Roman keine Kapitel hat
+
+# SQL
+
+```typescript
+create or replace function public.get_last_chapter_of_novel(
+  p_novel_id uuid
+)
+returns uuid
+language sql
+stable
+as $$
+  select c.id
+  from public.chapters c
+  where c.novel_id = p_novel_id
+  order by c.sort_order desc
+  limit 1;
+$$;
+```
+

@@ -1,0 +1,233 @@
+---
+title: get_relevant_mainflow_chapters
+---
+## Was die Funktion macht
+
+Diese Funktion sammelt die Kapitel, die im **Hauptstrang** relevant sind.
+
+Einfach gesagt:
+
+> Sie läuft vom Zielkapitel rückwärts den Storyflow entlang.
+
+---
+
+## Wofür die Funktion gut ist
+
+Du brauchst sie, wenn du wissen willst:
+
+- welche Kapitel im normalen Erzählpfad vor dem Ziel liegen
+
+- welche Kapitel für den Mainflow-Kontext relevant sind
+
+- welche Kapitel in den Haupttextblock eines Prompt-Kontexts gehören
+
+---
+
+## Welche Parameter sie hat
+
+### `p_chapter_id uuid`
+
+Das Zielkapitel.
+
+Von diesem Kapitel aus läuft die Funktion rückwärts.
+
+---
+
+### `p_compile_series boolean default false`
+
+Steuert, wie weit zurück gelaufen wird.
+
+#### Wenn `false`
+
+Nur innerhalb des aktuellen Romans.
+
+#### Wenn `true`
+
+Auch über Vorgängerromane hinweg.
+
+---
+
+## Was die Funktion zurückgibt
+
+Die Funktion gibt **mehrere Kapitelzeilen** zurück.
+
+### Rückgabefelder
+
+#### `chapter_id uuid`
+
+Die ID des relevanten Kapitels.
+
+#### `novel_id uuid`
+
+Der Roman, zu dem dieses Kapitel gehört.
+
+#### `chapter_sort integer`
+
+Die Reihenfolge des Kapitels im Roman.
+
+#### `depth integer`
+
+Wie weit das Kapitel vom Zielkapitel entfernt ist.
+
+- `0` = Zielkapitel
+
+- `1` = Vorgänger
+
+- `2` = davor
+
+- usw.
+
+---
+
+## Wie die Funktion denkt
+
+### Zuerst
+
+Sie nimmt das Zielkapitel.
+
+### Dann
+
+Sie fragt mit `get_main_predecessor_chapter(...)`:
+
+> „Was ist das vorherige Kapitel im Hauptstrang?“
+
+### Wenn es keines mehr gibt
+
+Und `p_compile_series = true` ist, dann fragt sie:
+
+> „Gibt es einen Vorgängerroman?“
+
+Wenn ja, springt sie zum **letzten Kapitel dieses Vorgängerromans** und läuft dort weiter.
+
+---
+
+## Einfaches Aufrufbeispiel
+
+```typescript
+select *
+from public.get_relevant_mainflow_chapters(
+  p_chapter_id := '22222222-2222-2222-2222-222222222222',
+  p_compile_series := false
+);
+```
+
+### Bedeutung
+
+> „Zeig mir den Mainflow dieses Kapitels innerhalb des aktuellen Romans.“
+
+---
+
+## Serienweiter Aufruf
+
+```typescript
+select *
+from public.get_relevant_mainflow_chapters(
+  p_chapter_id := '22222222-2222-2222-2222-222222222222',
+  p_compile_series := true
+);
+```
+
+### Bedeutung
+
+> „Zeig mir den Mainflow dieses Kapitels, auch über frühere Romane hinweg.“
+
+---
+
+## Beispiel einer Rückgabe
+
+```typescript
+chapter_id                              novel_id                                chapter_sort  depth
+------------------------------------    ------------------------------------    ------------  -----
+kap5-...                                rom3-...                                5             0
+kap3-...                                rom3-...                                3             1
+kap2-...                                rom3-...                                2             2
+kap5r2...                               rom2-...                                5             3
+kap4r2...                               rom2-...                                4             4
+```
+
+### Das bedeutet
+
+- &#x20;Ziel ist Kapitel 5 in Roman 3&#x20;
+
+- &#x20;davor kommt Kapitel 3&#x20;
+
+- &#x20;davor Kapitel 2&#x20;
+
+- &#x20;davor springt die Funktion in Roman 2&#x20;
+
+- &#x20;und läuft dort weiter&#x20;
+
+# SQL
+
+```typescript
+create or replace function public.get_relevant_mainflow_chapters(
+  p_chapter_id uuid,
+  p_compile_series boolean default false
+)
+returns table (
+  chapter_id uuid,
+  novel_id uuid,
+  chapter_sort integer,
+  depth integer
+)
+language plpgsql
+stable
+as $$
+declare
+  v_current_chapter_id uuid;
+  v_current_novel_id uuid;
+  v_pred_chapter_id uuid;
+  v_pred_novel_id uuid;
+  v_depth integer := 0;
+begin
+  v_current_chapter_id := p_chapter_id;
+
+  loop
+    select c.novel_id
+    into v_current_novel_id
+    from public.chapters c
+    where c.id = v_current_chapter_id;
+
+    if v_current_novel_id is null then
+      exit;
+    end if;
+
+    return query
+    select
+      c.id,
+      c.novel_id,
+      c.sort_order,
+      v_depth
+    from public.chapters c
+    where c.id = v_current_chapter_id;
+
+    v_pred_chapter_id := public.get_main_predecessor_chapter(v_current_chapter_id);
+
+    if v_pred_chapter_id is not null then
+      v_current_chapter_id := v_pred_chapter_id;
+      v_depth := v_depth + 1;
+      continue;
+    end if;
+
+    if not p_compile_series then
+      exit;
+    end if;
+
+    v_pred_novel_id := public.get_main_predecessor_novel(v_current_novel_id);
+
+    if v_pred_novel_id is null then
+      exit;
+    end if;
+
+    v_current_chapter_id := public.get_last_chapter_of_novel(v_pred_novel_id);
+
+    if v_current_chapter_id is null then
+      exit;
+    end if;
+
+    v_depth := v_depth + 1;
+  end loop;
+end;
+$$;
+```
+

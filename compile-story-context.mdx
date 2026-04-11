@@ -1,0 +1,695 @@
+---
+title: compile_story_context
+---
+## Was die Funktion macht
+
+Sie sammelt alle relevanten Texte für einen Zielpunkt und sortiert sie in getrennte Blöcke.
+
+Einfach gesagt:
+
+> Sie baut einen sauberen Kontext für die KI.
+
+---
+
+## Was sie einsammelt
+
+Sie trennt den Kontext in fünf Blöcke:
+
+### 1. `mainflow_fulltext`
+
+Volltexte aus dem Hauptweg
+
+### 2. `mainflow_summaries`
+
+Szenen- und Kapitel-Summaries aus dem Hauptweg
+
+### 3. `inflow_fulltext`
+
+Volltexte aus den inflows
+
+### 4. `inflow_summaries`
+
+Szenen- und Kapitel-Summaries aus den inflows
+
+### 5. `novel_summaries`
+
+Roman-Zusammenfassungen
+
+---
+
+## Wofür sie gut ist
+
+Für:
+
+- KI-Prompt-Kontext
+
+- Schreibassistenz
+
+- Story-Debugging
+
+- strukturierte Kontextpakete
+
+---
+
+## Welche Parameter sie hat
+
+### `p_chapter_id uuid default null`
+
+Zielkapitel.
+
+Wenn gesetzt:
+
+- das Zielkapitel wird **vollständig aufgenommen**
+
+---
+
+### `p_beat_id uuid default null`
+
+Zielbeat.
+
+Wenn gesetzt:
+
+- im Zielkapitel wird **nur bis vor diesen Beat** gesammelt
+
+- der Beat selbst wird **nicht** aufgenommen
+
+---
+
+### `p_compile_series boolean default false`
+
+Steuert, ob nur innerhalb des aktuellen Romans oder auch über Vorgängerromane hinweg gesammelt wird.
+
+---
+
+### `p_required_only boolean default false`
+
+Steuert, ob nur inflows mit `is_required = true` einbezogen werden.
+
+---
+
+### `p_novel_summary_mode text default 'previous_only'`
+
+Steuert, welche Roman-Summaries aufgenommen werden.
+
+Erlaubte Werte:
+
+#### `'none'`
+
+Keine Roman-Summaries
+
+#### `'previous_only'`
+
+Nur Vorgängerromane, nicht der aktuelle Roman
+
+#### `'include_current'`
+
+Aktueller Roman plus Vorgängerromane
+
+---
+
+### `p_full_text_limit integer default 12000`
+
+Zeichenlimit für die Volltext-Blöcke.
+
+Getrennt für:
+
+- Mainflow Volltext
+
+- Inflow Volltext
+
+---
+
+### `p_summary_limit integer default 6000`
+
+Zeichenlimit für die Summary-Blöcke.
+
+Getrennt für:
+
+- Mainflow Summaries
+
+- Inflow Summaries
+
+- Novel Summaries
+
+---
+
+## Was die Funktion zurückgibt
+
+Sie gibt **eine einzige Zeile** zurück mit folgenden Feldern:
+
+### `mainflow_fulltext text`
+
+Die Volltexte des Hauptwegs
+
+### `mainflow_summaries text`
+
+Die Summary-Texte des Hauptwegs
+
+### `inflow_fulltext text`
+
+Die Volltexte der Inflows
+
+### `inflow_summaries text`
+
+Die Summary-Texte der Inflows
+
+### `novel_summaries text`
+
+Die Summary-Texte der Romane
+
+### `mainflow_fulltext_truncated boolean`
+
+Wurde Mainflow Volltext wegen Limit abgeschnitten?
+
+### `mainflow_summaries_truncated boolean`
+
+Wurden Mainflow Summaries wegen Limit abgeschnitten?
+
+### `inflow_fulltext_truncated boolean`
+
+Wurde Inflow Volltext wegen Limit abgeschnitten?
+
+### `inflow_summaries_truncated boolean`
+
+Wurden Inflow Summaries wegen Limit abgeschnitten?
+
+### `novel_summaries_truncated boolean`
+
+Wurden Novel Summaries wegen Limit abgeschnitten?
+
+---
+
+# Umfangreiche Aufrufbeispiele für `compile_story_context`
+
+---
+
+## Beispiel 1: Ganzes Kapitel im aktuellen Roman
+
+```typescript
+select *
+from public.compile_story_context(
+  p_chapter_id := 'kapitel-uuid-1',
+  p_beat_id := null,
+  p_compile_series := false,
+  p_required_only := false,
+  p_novel_summary_mode := 'none',
+  p_full_text_limit := 12000,
+  p_summary_limit := 6000
+);
+```
+
+### Bedeutung
+
+> „Gib mir den Kontext für dieses Kapitel.\
+> &#x20;Zielkapitel vollständig, nur im aktuellen Roman, keine Roman-Summaries.“
+
+### Typischer Einsatz
+
+Wenn du an einem Kapitel arbeitest und nur den lokalen Buchkontext brauchst.
+
+---
+
+## Beispiel 2: Beat als Zielpunkt, ohne Zielbeat selbst
+
+```typescript
+select *
+from public.compile_story_context(
+  p_chapter_id := null,
+  p_beat_id := 'beat-uuid-1',
+  p_compile_series := false,
+  p_required_only := false,
+  p_novel_summary_mode := 'none',
+  p_full_text_limit := 12000,
+  p_summary_limit := 6000
+);
+```
+
+### Bedeutung
+
+> „Ich stehe an diesem Beat.\
+> &#x20;Sammle alles davor, aber nicht diesen Beat selbst.“
+
+### Typischer Einsatz
+
+Wenn die KI mitten in einer Szene weiterschreiben soll.
+
+---
+
+## Beispiel 3: Kapitel mit Serienkontext
+
+```typescript
+select *
+from public.compile_story_context(
+  p_chapter_id := 'kapitel-uuid-2',
+  p_beat_id := null,
+  p_compile_series := true,
+  p_required_only := false,
+  p_novel_summary_mode := 'previous_only',
+  p_full_text_limit := 15000,
+  p_summary_limit := 8000
+);
+```
+
+### Bedeutung
+
+> „Nimm nicht nur dieses Buch, sondern auch die flow-relevanten Vorgängerromane.\
+> &#x20;Aber spoilere mir den aktuellen Roman nicht über seine Roman-Summary.“
+
+### Typischer Einsatz
+
+Wenn du in einem späteren Band schreibst und Vorwissen aus früheren Bänden brauchst.
+
+---
+
+## Beispiel 4: Nur verpflichtende inflows
+
+```typescript
+select *
+from public.compile_story_context(
+  p_chapter_id := 'kapitel-uuid-3',
+  p_beat_id := null,
+  p_compile_series := true,
+  p_required_only := true,
+  p_novel_summary_mode := 'previous_only',
+  p_full_text_limit := 12000,
+  p_summary_limit := 6000
+);
+```
+
+### Bedeutung
+
+> „Nimm nur die inflows, die wirklich Pflicht sind.“
+
+### Typischer Einsatz
+
+Wenn du den Prompt schlanker halten willst und nur die harten Seitenpfade brauchst.
+
+---
+
+## Beispiel 5: Auch die Summary des aktuellen Romans mitnehmen
+
+```typescript
+select *
+from public.compile_story_context(
+  p_chapter_id := 'kapitel-uuid-4',
+  p_beat_id := null,
+  p_compile_series := true,
+  p_required_only := false,
+  p_novel_summary_mode := 'include_current',
+  p_full_text_limit := 12000,
+  p_summary_limit := 6000
+);
+```
+
+### Bedeutung
+
+> „Ich will auch die Zusammenfassung des aktuellen Romans im Kontext haben.“
+
+### Typischer Einsatz
+
+Wenn du kein Spoilerproblem hast und maximale Verdichtung willst.
+
+---
+
+## Beispiel 6: Gar keine Roman-Summaries
+
+```typescript
+select *
+from public.compile_story_context(
+  p_chapter_id := 'kapitel-uuid-5',
+  p_beat_id := null,
+  p_compile_series := true,
+  p_required_only := false,
+  p_novel_summary_mode := 'none',
+  p_full_text_limit := 12000,
+  p_summary_limit := 6000
+);
+```
+
+### Bedeutung
+
+> „Sammle alles andere, aber keine Roman-Summaries.“
+
+---
+
+## Beispiel 7: Kleine Limits zum Testen
+
+```typescript
+select *
+from public.compile_story_context(
+  p_chapter_id := 'kapitel-uuid-6',
+  p_beat_id := null,
+  p_compile_series := false,
+  p_required_only := false,
+  p_novel_summary_mode := 'previous_only',
+  p_full_text_limit := 300,
+  p_summary_limit := 150
+);
+```
+
+### Bedeutung
+
+> „Teste absichtlich, ob die Truncated-Flags sauber anspringen.“
+
+---
+
+## Beispiel 8: Typischer Prompt-Vorbereitungsaufruf
+
+```sql
+select *
+from public.compile_story_context(
+  p_chapter_id := null,
+  p_beat_id := 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+  p_compile_series := true,
+  p_required_only := true,
+  p_novel_summary_mode := 'previous_only',
+  p_full_text_limit := 16000,
+  p_summary_limit := 9000
+);
+```
+
+### Bedeutung
+
+> „Ich will einen starken, aber spoilerarmen KI-Kontext:\
+> &#x20;Zielbeat exklusiv, Serienkontext an, nur wichtige inflows, nur frühere Roman-Summaries.“
+
+---
+
+# Beispiel einer Rückgabe von `compile_story_context`
+
+```sql
+mainflow_fulltext:
+"Text aus Kapitel 2 ... Text aus Kapitel 3 ..."
+
+mainflow_summaries:
+"Zusammenfassung Szene 1 ...
+Zusammenfassung Kapitel 3 ..."
+
+inflow_fulltext:
+"Text aus Inflow-Kapitel X ..."
+
+inflow_summaries:
+"Zusammenfassung Inflow-Kapitel X ..."
+
+novel_summaries:
+"Zusammenfassung Roman 1 ...
+Zusammenfassung Roman 2 ..."
+
+mainflow_fulltext_truncated: false
+mainflow_summaries_truncated: false
+inflow_fulltext_truncated: true
+inflow_summaries_truncated: false
+novel_summaries_truncated: false
+```
+
+### Das bedeutet
+
+- &#x20;Hauptweg vollständig&#x20;
+
+- &#x20;inflow-Volltext war zu lang und wurde abgeschnitten&#x20;
+
+- &#x20;Roman-Summaries wurden erfolgreich gesammelt&#x20;
+
+---
+
+# SQL
+
+```typescript
+create or replace function public.compile_story_context(
+  p_chapter_id uuid default null,
+  p_beat_id uuid default null,
+  p_compile_series boolean default false,
+  p_required_only boolean default false,
+  p_novel_summary_mode text default 'previous_only',
+  p_full_text_limit integer default 12000,
+  p_summary_limit integer default 6000
+)
+returns table (
+  mainflow_fulltext text,
+  mainflow_summaries text,
+  inflow_fulltext text,
+  inflow_summaries text,
+  novel_summaries text,
+  mainflow_fulltext_truncated boolean,
+  mainflow_summaries_truncated boolean,
+  inflow_fulltext_truncated boolean,
+  inflow_summaries_truncated boolean,
+  novel_summaries_truncated boolean
+)
+language plpgsql
+stable
+as $$
+declare
+  v_target record;
+  v_main record;
+  v_inflow record;
+  v_novel record;
+
+  v_mainflow_fulltext text := '';
+  v_mainflow_summaries text := '';
+  v_inflow_fulltext text := '';
+  v_inflow_summaries text := '';
+  v_novel_summaries text := '';
+
+  v_mainflow_fulltext_truncated boolean := false;
+  v_mainflow_summaries_truncated boolean := false;
+  v_inflow_fulltext_truncated boolean := false;
+  v_inflow_summaries_truncated boolean := false;
+  v_novel_summaries_truncated boolean := false;
+
+  v_block text;
+begin
+  if p_novel_summary_mode not in ('none', 'previous_only', 'include_current') then
+    raise exception 'Ungültiger Wert für p_novel_summary_mode: %. Erlaubt sind: none, previous_only, include_current', p_novel_summary_mode;
+  end if;
+
+  select *
+  into v_target
+  from public.get_story_context_target(p_chapter_id, p_beat_id);
+
+  -- =========================
+  -- MAINFLOW FULLTEXT
+  -- =========================
+  for v_main in
+    select *
+    from public.get_relevant_mainflow_chapters(v_target.chapter_id, p_compile_series)
+    order by depth desc, chapter_sort
+  loop
+    if v_target.target_mode = 'beat' and v_main.chapter_id = v_target.chapter_id then
+      select coalesce(string_agg(b.draft_text, E'\n\n' order by s.sort_order, b.sort_order), '')
+      into v_block
+      from public.scenes s
+      join public.beats b on b.scene_id = s.id
+      where s.chapter_id = v_main.chapter_id
+        and coalesce(b.is_active, true) = true
+        and nullif(btrim(coalesce(b.draft_text, '')), '') is not null
+        and (
+          s.sort_order < v_target.target_scene_sort
+          or (
+            s.sort_order = v_target.target_scene_sort
+            and b.sort_order < v_target.target_beat_sort
+          )
+        );
+    else
+      select coalesce(string_agg(b.draft_text, E'\n\n' order by s.sort_order, b.sort_order), '')
+      into v_block
+      from public.scenes s
+      join public.beats b on b.scene_id = s.id
+      where s.chapter_id = v_main.chapter_id
+        and coalesce(b.is_active, true) = true
+        and nullif(btrim(coalesce(b.draft_text, '')), '') is not null;
+    end if;
+
+    if nullif(v_block, '') is not null then
+      if char_length(v_mainflow_fulltext) + char_length(v_block) + 2 <= p_full_text_limit then
+        v_mainflow_fulltext :=
+          case
+            when v_mainflow_fulltext = '' then v_block
+            else v_mainflow_fulltext || E'\n\n' || v_block
+          end;
+      else
+        v_mainflow_fulltext_truncated := true;
+      end if;
+    end if;
+  end loop;
+
+  -- =========================
+  -- MAINFLOW SUMMARIES
+  -- =========================
+  for v_main in
+    select *
+    from public.get_relevant_mainflow_chapters(v_target.chapter_id, p_compile_series)
+    order by depth desc, chapter_sort
+  loop
+    select coalesce(string_agg(x.txt, E'\n\n' order by x.ord1, x.ord2), '')
+    into v_block
+    from (
+      select
+        1 as ord1,
+        s.sort_order as ord2,
+        s.summary as txt
+      from public.scenes s
+      where s.chapter_id = v_main.chapter_id
+        and nullif(btrim(coalesce(s.summary, '')), '') is not null
+        and (
+          v_target.target_mode <> 'beat'
+          or v_main.chapter_id <> v_target.chapter_id
+          or s.sort_order < v_target.target_scene_sort
+        )
+
+      union all
+
+      select
+        2 as ord1,
+        999999 as ord2,
+        c.summary as txt
+      from public.chapters c
+      where c.id = v_main.chapter_id
+        and nullif(btrim(coalesce(c.summary, '')), '') is not null
+        and v_target.target_mode <> 'beat'
+    ) x;
+
+    if nullif(v_block, '') is not null then
+      if char_length(v_mainflow_summaries) + char_length(v_block) + 2 <= p_summary_limit then
+        v_mainflow_summaries :=
+          case
+            when v_mainflow_summaries = '' then v_block
+            else v_mainflow_summaries || E'\n\n' || v_block
+          end;
+      else
+        v_mainflow_summaries_truncated := true;
+      end if;
+    end if;
+  end loop;
+
+  -- =========================
+  -- INFLOW FULLTEXT
+  -- =========================
+  for v_inflow in
+    select *
+    from public.get_relevant_inflow_chapters(
+      v_target.chapter_id,
+      p_compile_series,
+      p_required_only
+    )
+  loop
+    select coalesce(string_agg(b.draft_text, E'\n\n' order by s.sort_order, b.sort_order), '')
+    into v_block
+    from public.scenes s
+    join public.beats b on b.scene_id = s.id
+    where s.chapter_id = v_inflow.inflow_chapter_id
+      and coalesce(b.is_active, true) = true
+      and nullif(btrim(coalesce(b.draft_text, '')), '') is not null;
+
+    if nullif(v_block, '') is not null then
+      if char_length(v_inflow_fulltext) + char_length(v_block) + 2 <= p_full_text_limit then
+        v_inflow_fulltext :=
+          case
+            when v_inflow_fulltext = '' then v_block
+            else v_inflow_fulltext || E'\n\n' || v_block
+          end;
+      else
+        v_inflow_fulltext_truncated := true;
+      end if;
+    end if;
+  end loop;
+
+  -- =========================
+  -- INFLOW SUMMARIES
+  -- =========================
+  for v_inflow in
+    select *
+    from public.get_relevant_inflow_chapters(
+      v_target.chapter_id,
+      p_compile_series,
+      p_required_only
+    )
+  loop
+    select coalesce(string_agg(x.txt, E'\n\n' order by x.ord1, x.ord2), '')
+    into v_block
+    from (
+      select
+        1 as ord1,
+        s.sort_order as ord2,
+        s.summary as txt
+      from public.scenes s
+      where s.chapter_id = v_inflow.inflow_chapter_id
+        and nullif(btrim(coalesce(s.summary, '')), '') is not null
+
+      union all
+
+      select
+        2 as ord1,
+        999999 as ord2,
+        c.summary as txt
+      from public.chapters c
+      where c.id = v_inflow.inflow_chapter_id
+        and nullif(btrim(coalesce(c.summary, '')), '') is not null
+    ) x;
+
+    if nullif(v_block, '') is not null then
+      if char_length(v_inflow_summaries) + char_length(v_block) + 2 <= p_summary_limit then
+        v_inflow_summaries :=
+          case
+            when v_inflow_summaries = '' then v_block
+            else v_inflow_summaries || E'\n\n' || v_block
+          end;
+      else
+        v_inflow_summaries_truncated := true;
+      end if;
+    end if;
+  end loop;
+
+  -- =========================
+  -- NOVEL SUMMARIES
+  -- =========================
+  if p_novel_summary_mode <> 'none' then
+    for v_novel in
+      select *
+      from public.get_relevant_mainflow_novels(v_target.novel_id, p_compile_series)
+      where
+        (
+          p_novel_summary_mode = 'include_current'
+        )
+        or (
+          p_novel_summary_mode = 'previous_only'
+          and depth > 0
+        )
+      order by depth desc, novel_sort
+    loop
+      select n.summary
+      into v_block
+      from public.novels n
+      where n.id = v_novel.novel_id
+        and nullif(btrim(coalesce(n.summary, '')), '') is not null;
+
+      if nullif(v_block, '') is not null then
+        if char_length(v_novel_summaries) + char_length(v_block) + 2 <= p_summary_limit then
+          v_novel_summaries :=
+            case
+              when v_novel_summaries = '' then v_block
+              else v_novel_summaries || E'\n\n' || v_block
+            end;
+        else
+          v_novel_summaries_truncated := true;
+        end if;
+      end if;
+    end loop;
+  end if;
+
+  return query
+  select
+    v_mainflow_fulltext,
+    v_mainflow_summaries,
+    v_inflow_fulltext,
+    v_inflow_summaries,
+    v_novel_summaries,
+    v_mainflow_fulltext_truncated,
+    v_mainflow_summaries_truncated,
+    v_inflow_fulltext_truncated,
+    v_inflow_summaries_truncated,
+    v_novel_summaries_truncated;
+end;
+$$;
+```
+

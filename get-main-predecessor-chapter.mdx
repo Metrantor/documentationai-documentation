@@ -1,0 +1,92 @@
+---
+title: get_main_predecessor_chapter
+---
+## Zweck
+
+Diese Funktion ermittelt den **Hauptvorgänger eines Kapitels**.
+
+Sie beantwortet also die Frage:
+
+> Welches Kapitel liegt im normalen Storyflow direkt vor diesem Kapitel?
+
+## Logik
+
+Die Funktion prüft in dieser Reihenfolge:
+
+1. Gibt es das Kapitel überhaupt?
+
+2. Ist das Kapitel als `is_standalone = true` markiert?
+
+   - dann gibt es **keinen** Vorgänger
+
+3. Ist `predecessor_chapter_id` gesetzt?
+
+   - dann ist **dieses Kapitel** der Vorgänger
+
+4. Sonst:
+
+   - nimm im selben Roman das Kapitel mit der nächstkleineren `sort_order`
+
+## Parameter
+
+### `p_chapter_id uuid`
+
+Die ID des Kapitels, dessen Hauptvorgänger gesucht wird.
+
+## Rückgabe
+
+### `uuid`
+
+- die Kapitel-ID des Hauptvorgängers
+
+- oder `null`, wenn es keinen gibt
+
+# SQL-Code
+
+```typescript
+create or replace function public.get_main_predecessor_chapter(
+  p_chapter_id uuid
+)
+returns uuid
+language plpgsql
+stable
+as $$
+declare
+  v_chapter record;
+  v_pred uuid;
+begin
+  select
+    c.id,
+    c.novel_id,
+    c.sort_order,
+    c.predecessor_chapter_id,
+    c.is_standalone
+  into v_chapter
+  from public.chapters c
+  where c.id = p_chapter_id;
+
+  if not found then
+    return null;
+  end if;
+
+  if coalesce(v_chapter.is_standalone, false) = true then
+    return null;
+  end if;
+
+  if v_chapter.predecessor_chapter_id is not null then
+    return v_chapter.predecessor_chapter_id;
+  end if;
+
+  select c2.id
+  into v_pred
+  from public.chapters c2
+  where c2.novel_id = v_chapter.novel_id
+    and c2.sort_order < v_chapter.sort_order
+  order by c2.sort_order desc
+  limit 1;
+
+  return v_pred;
+end;
+$$;
+```
+

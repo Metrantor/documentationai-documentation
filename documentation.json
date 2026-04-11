@@ -70,8 +70,53 @@
                 "group": "Anwendungs-Oberfläche",
                 "pages": [
                   {
+                    "title": "get_main_predecessor_novel",
+                    "path": "get-main-predecessor-novel"
+                  },
+                  {
+                    "group": "Story Context Aggregation V2",
+                    "pages": [
+                      {
+                        "title": "Übersicht: Flow-Kontext-Funktionen ",
+                        "path": "Flow-Kontext-Funktionen"
+                      },
+                      {
+                        "title": "compile_story_context",
+                        "path": "compile-story-context"
+                      },
+                      {
+                        "title": "get_last_chapter_of_novel",
+                        "path": "get-last-chapter-of-novel"
+                      },
+                      {
+                        "title": "get_relevant_inflow_chapters",
+                        "path": "get-relevant-inflow-chapters"
+                      },
+                      {
+                        "title": "get_relevant_mainflow_chapters",
+                        "path": "get-relevant-mainflow-chapters"
+                      },
+                      {
+                        "title": "story_context_target",
+                        "path": "story-context-target"
+                      },
+                      {
+                        "title": "get_relevant_mainflow_novels",
+                        "path": "get_relevant_mainflow_novels"
+                      },
+                      {
+                        "title": "get_main_predecessor_chapter",
+                        "path": "get-main-predecessor-chapter"
+                      }
+                    ]
+                  },
+                  {
                     "group": "Aura Canvas",
                     "pages": [
+                      {
+                        "title": "Aura Prompt-Aufba",
+                        "path": "aura-prompt-aufba"
+                      },
                       {
                         "title": "Prompts zur Erstellung der Kapitel-Knoten-Inhalte",
                         "path": "prompts-zur-erstellung-der-kapitel-knoten-inhalte"
