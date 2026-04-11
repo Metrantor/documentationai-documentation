@@ -1,0 +1,489 @@
+Ja. Ich ziehe es dir sauber auseinander.
+
+# 1. Kurzüberblick mit `{{namen}}` und Bedeutung
+
+## Für **Draft erstellen**
+
+- `{{seed}}` — die eigentliche Kapitelidee
+
+- `{{prompt}}` — zusätzliche Anweisung für die Erstellung
+
+- `{{seed_context}}` — die Idee in strukturierter Pseudo-HTML-Form
+
+- `{{prompt_context}}` — der Prompt in strukturierter Pseudo-HTML-Form
+
+- `{{ideas_context}}` — alle über den Ideas-Eingang eingespeisten Inhalte
+
+- `{{codex_context}}` — alle über den Codex-Eingang eingespeisten Inhalte
+
+- `{{story_flow_context}}` — alle über Story-Flow eingespeisten Inhalte
+
+- `{{complete_summary_context}}` — alle Synopsis-Vorgänger entlang des Story-Flows
+
+- `{{current_draft_context}}` — aktueller Draft des Zielkapitels, falls vorhanden
+
+- `{{scenes_context}}` — vorhandene Szenen des Zielkapitels, falls vorhanden
+
+- `{{full_context}}` — alles Relevante in einem Gesamtblock
+
+## Für **Szenen erzeugen**
+
+- `{{seed}}` — die Kapitelidee
+
+- `{{prompt}}` — zusätzliche Anweisung
+
+- `{{seed_context}}` — Idee in strukturierter Form
+
+- `{{prompt_context}}` — Prompt in strukturierter Form
+
+- `{{story_context}}` — der aktuelle Kapitelentwurf als Hauptgrundlage für Szenen
+
+- `{{current_draft_context}}` — aktueller Draft in eigener Struktur
+
+- `{{ideas_context}}` — Ideen-Eingänge
+
+- `{{codex_context}}` — Codex-Eingänge
+
+- `{{story_flow_context}}` — Story-Flow-Eingänge
+
+- `{{complete_summary_context}}` — Vorgänger-Synopsen
+
+- `{{scenes_context}}` — vorhandene Szenen, falls schon welche da sind
+
+- `{{full_context}}` — alles zusammen
+
+## Für **Synopsis erstellen**
+
+- `{{seed}}` — Kapitelidee
+
+- `{{prompt}}` — zusätzliche Anweisung
+
+- `{{seed_context}}` — Idee in strukturierter Form
+
+- `{{prompt_context}}` — Prompt in strukturierter Form
+
+- `{{story_context}}` — aktueller Kapitelentwurf
+
+- `{{current_draft_context}}` — Draft in eigener Struktur
+
+- `{{scenes_context}}` — vorhandene Szenen strukturiert
+
+- `{{full_scenes_context}}` — alle Szenen ausführlicher und promptfreundlich zusammengefasst
+
+- `{{ideas_context}}` — Ideen-Eingänge
+
+- `{{codex_context}}` — Codex-Eingänge
+
+- `{{story_flow_context}}` — Story-Flow-Eingänge
+
+- `{{complete_summary_context}}` — Vorgänger-Synopsen
+
+- `{{full_context}}` — alles zusammen
+
+---
+
+# 2. Erläutert mit Bedeutung und Beispielen
+
+## A. Draft erstellen
+
+### `{{seed}}`
+
+Die nackte Kapitelidee als Rohwert.
+
+Beispiel:
+
+```typescript
+Die Idee für Kapitel Nummer 3.
+
+```
+
+### `{{prompt}}`
+
+Die direkte Zusatzanweisung, wie der Draft erzeugt werden soll.
+
+Beispiel:
+
+```typescript
+Das hier ist der Prompt für Kapitel Nummer 3.
+
+```
+
+### `{{seed_context}}`
+
+Dasselbe wie `seed`, aber als strukturierter Block.
+
+Beispiel:
+
+```typescript
+<seed>
+Die Idee für Kapitel Nummer 3.
+</seed>
+
+```
+
+### `{{prompt_context}}`
+
+Dasselbe wie `prompt`, aber strukturiert.
+
+Beispiel:
+
+```typescript
+<prompt>
+Das hier ist der Prompt für Kapitel Nummer 3.
+</prompt>
+
+```
+
+### `{{ideas_context}}`
+
+Alles, was über den **Ideas-Eingang** eingespeist wurde, reduziert auf Titel und Inhalt.
+
+Beispiel:
+
+```typescript
+<ideas>
+<idea title="John Washington">
+Im Gegensatz zu Kirk ist John ein Draufgänger ...
+</idea>
+<idea title="Neue Idee">
+IDEE als Idee, wie orginell
+</idea>
+</ideas>
+
+```
+
+### `{{codex_context}}`
+
+Alles, was über den **Codex-Eingang** kommt, reduziert auf Titel und Beschreibung.
+
+Beispiel:
+
+```typescript
+<codex>
+<codex_entry title="Die Höhle">
+- Die Höhlenlandschaft besteht aus einem mehrstöckigen ...
+</codex_entry>
+</codex>
+
+```
+
+### `{{story_flow_context}}`
+
+Alles, was über **Story-Flow** eingespeist wird. Das können Drafts, Zusammenfassungen oder einfache Texte sein.
+
+Beispiel:
+
+```typescript
+<story_flow>
+<story_item type="draft" title="Kapitel 2">
+<draft>
+<title>
+Entwurf 1
+</title>
+<text>
+...
+</text>
+</draft>
+</story_item>
+<story_item type="text" title="Neue Idee">
+<text>
+- Idee als Story-Flow-Input für Kapitel 3
+</text>
+</story_item>
+</story_flow>
+
+```
+
+### `{{complete_summary_context}}`
+
+Die Synopsen aller Kapitel-Vorgänger entlang des Story-Flows, in Reihenfolge.
+
+Beispiel:
+
+```typescript
+<complete_summary>
+<chapter_summary title="Kapitel 1">
+Synopsis für Kapitel Nummer 1.
+</chapter_summary>
+<chapter_summary title="Kapitel 2">
+Die Synopsis für Kapitel Nummer 2.
+</chapter_summary>
+</complete_summary>
+
+```
+
+### `{{current_draft_context}}`
+
+Nur relevant, wenn im Zielkapitel schon ein Draft existiert. Für Draft-Erzeugung eher optional.
+
+Beispiel:
+
+```typescript
+<current_draft>
+<title>
+Aktueller Draft
+</title>
+<text>
+Bisheriger Entwurf ...
+</text>
+</current_draft>
+
+```
+
+### `{{scenes_context}}`
+
+Vorhandene Szenen des Zielkapitels, falls es schon welche gibt.
+
+Beispiel:
+
+```typescript
+<scenes>
+<scene title="Szene 1">
+Text der Szene
+</scene>
+</scenes>
+
+```
+
+### `{{full_context}}`
+
+Alles zusammen in einem einzigen Block.
+
+Beispiel:
+
+```typescript
+<full_context>
+... alle Blöcke kombiniert ...
+</full_context>
+
+```
+
+### Was für Draft am wichtigsten ist
+
+Am wichtigsten sind meist:
+
+- `{{seed}}`
+
+- `{{prompt}}`
+
+- `{{ideas_context}}`
+
+- `{{codex_context}}`
+
+- `{{story_flow_context}}`
+
+- `{{complete_summary_context}}`
+
+---
+
+## B. Szenen erzeugen
+
+Hier ist der entscheidende Unterschied:\
+Jetzt ist nicht mehr nur die Idee wichtig, sondern vor allem der **Kapitelentwurf**, aus dem Szenen abgeleitet werden.
+
+### `{{story_context}}`
+
+Der aktuelle Draft als Hauptgrundlage für die Szenenentwicklung.
+
+Beispiel:
+
+```typescript
+<story>
+<title>
+Kurze Beschreibung der ersten Szene
+</title>
+<text>
+Text der ersten Szene
+</text>
+</story>
+
+```
+
+### `{{current_draft_context}}`
+
+Im Prinzip derselbe Inhalt, aber unter einem anderen, expliziteren Namen.
+
+Beispiel:
+
+```typescript
+<current_draft>
+<title>
+Kurze Beschreibung der ersten Szene
+</title>
+<text>
+Text der ersten Szene
+</text>
+</current_draft>
+
+```
+
+### `{{ideas_context}}`
+
+Zusatzideen, die in die Szenenentwicklung einfließen können.
+
+### `{{codex_context}}`
+
+Figuren, Orte, Hintergründe, die die Szenen mit Inhalt füttern.
+
+### `{{story_flow_context}}`
+
+Vorherige Kapitelentwürfe oder Story-Flow-Hinweise.
+
+### `{{complete_summary_context}}`
+
+Gesamter bisheriger Verlauf in verdichteter Form.
+
+### `{{scenes_context}}`
+
+Falls schon Szenen da sind, können sie als Ausgangspunkt oder Ersetzungsgrundlage dienen.
+
+### `{{full_context}}`
+
+Alle relevanten Blöcke zusammen.
+
+### Was für Szenen am wichtigsten ist
+
+Am wichtigsten sind meist:
+
+- `{{story_context}}`
+
+- `{{prompt}}`
+
+- `{{ideas_context}}`
+
+- `{{codex_context}}`
+
+- `{{story_flow_context}}`
+
+- `{{complete_summary_context}}`
+
+---
+
+## C. Synopsis erstellen
+
+Hier ist die wichtigste Basis nicht nur der Draft, sondern vor allem die **ausformulierten Szenen**.
+
+### `{{story_context}}`
+
+Der Kapitelentwurf als übergeordnete Basis.
+
+### `{{scenes_context}}`
+
+Die Szenen in kompakter, strukturierter Form.
+
+Beispiel:
+
+```typescript
+<scenes>
+<scene title="Kurze Beschreibung der ersten Szene">
+Text der ersten Szene
+</scene>
+<scene title="Kurze Beschreibung der zweiten Szene">
+Text der zweiten Szene
+</scene>
+</scenes>
+
+```
+
+### `{{full_scenes_context}}`
+
+Die Szenen in ausführlicherer, promptfreundlicher Form, besonders gut für Zusammenfassungen.
+
+Beispiel:
+
+```typescript
+<full_scenes>
+<scene_block number="1" title="Kurze Beschreibung der ersten Szene">
+<scene_title>
+Kurze Beschreibung der ersten Szene
+</scene_title>
+<scene_text>
+Text der ersten Szene
+</scene_text>
+</scene_block>
+<scene_block number="2" title="Kurze Beschreibung der zweiten Szene">
+<scene_title>
+Kurze Beschreibung der zweiten Szene
+</scene_title>
+<scene_text>
+Text der zweiten Szene
+</scene_text>
+</scene_block>
+</full_scenes>
+
+```
+
+### `{{codex_context}}`
+
+Wichtig, damit die Synopsis nicht Figuren oder Orte verdreht.
+
+### `{{complete_summary_context}}`
+
+Wichtig, damit die neue Synopsis zum bisherigen Verlauf passt.
+
+### `{{full_context}}`
+
+Alles zusammen, falls du lieber einen einzigen Kontextblock übergibst.
+
+### Was für Synopsis am wichtigsten ist
+
+Am wichtigsten sind meist:
+
+- `{{story_context}}`
+
+- `{{full_scenes_context}}`
+
+- `{{prompt}}`
+
+- `{{codex_context}}`
+
+- `{{complete_summary_context}}`
+
+---
+
+# 3. Praktische Kurzempfehlung pro Funktion
+
+## Draft
+
+Nimm bevorzugt:
+
+```typescript
+{{seed}}
+{{prompt}}
+{{ideas_context}}
+{{codex_context}}
+{{story_flow_context}}
+{{complete_summary_context}}
+
+```
+
+## Szenen
+
+Nimm bevorzugt:
+
+```typescript
+{{seed}}
+{{prompt}}
+{{story_context}}
+{{ideas_context}}
+{{codex_context}}
+{{story_flow_context}}
+{{complete_summary_context}}
+
+```
+
+## Synopsis
+
+Nimm bevorzugt:
+
+```typescript
+{{seed}}
+{{prompt}}
+{{story_context}}
+{{full_scenes_context}}
+{{codex_context}}
+{{complete_summary_context}}
+
+```
+
+Wenn du willst, ziehe ich dir das im nächsten Schritt noch in eine **Tabelle „Feld | Draft | Szenen | Synopsis | Pflicht/Nice-to-have“**.
