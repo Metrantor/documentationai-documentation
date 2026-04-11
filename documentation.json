@@ -67,12 +67,8 @@
                 "pages": []
               },
               {
-                "group": "Anwendungs-Oberfläche",
+                "group": "Funktionen",
                 "pages": [
-                  {
-                    "title": "get_main_predecessor_novel",
-                    "path": "get-main-predecessor-novel"
-                  },
                   {
                     "group": "Story Context Aggregation V2",
                     "pages": [
@@ -109,6 +105,15 @@
                         "path": "get-main-predecessor-chapter"
                       }
                     ]
+                  }
+                ]
+              },
+              {
+                "group": "Anwendungs-Oberfläche",
+                "pages": [
+                  {
+                    "title": "get_main_predecessor_novel",
+                    "path": "get-main-predecessor-novel"
                   },
                   {
                     "group": "Aura Canvas",
