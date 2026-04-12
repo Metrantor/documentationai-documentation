@@ -1,0 +1,307 @@
+---
+title: Modelle aus lokalem LM Studio nutzen
+---
+# Kurzanleitung: Externe n8n-Instanz mit lokalem LM Studio verbinden
+
+## Ziel
+
+Deine externe n8n-Instanz soll Anfragen an dein **lokales LM Studio** schicken.
+
+Dafür nutzt du:
+
+- **LM Studio** auf deinem Windows-11-Rechner
+
+- **cloudflared** als temporären Tunnel
+
+- die **OpenAI-kompatible API** von LM Studio
+
+- einen **HTTP Request Node** in n8n
+
+---
+
+# 1. LM Studio lokal starten
+
+## Was du tun musst
+
+1. **LM Studio öffnen**
+
+2. Modell laden
+
+3. Zu **Developer** gehen
+
+4. **Local Server starten**
+
+## Test in PowerShell
+
+```typescript
+Invoke-RestMethod -Uri "http://localhost:1234/v1/models" -Method Get
+
+```
+
+## Erwartung
+
+Du bekommst Modellinfos zurück.
+
+Wenn das klappt, läuft LM Studio lokal korrekt.
+
+---
+
+# 2. Optional, aber sinnvoll: Auth aktivieren
+
+## In LM Studio
+
+Im Bereich **Developer / Server Settings**:
+
+- **Require Authentication** einschalten
+
+- Token erzeugen und speichern
+
+## Test mit Token
+
+```typescript
+$token = "DEIN_TOKEN"
+
+Invoke-RestMethod `
+  -Uri "http://localhost:1234/v1/models" `
+  -Method Get `
+  -Headers @{ Authorization = "Bearer $token" }
+
+```
+
+## Wichtig
+
+Diesen Token brauchst du später in n8n.
+
+---
+
+# 3. Cloudflare Quick Tunnel starten
+
+
+
+Auf <a href="http://Cloudflare.com" target="_blank" rel="noopener noreferrer">Cloudflare.com</a> unter Tunnels einen solchen anlegen und diesen Befehl ausführen, der hier mit einem lange key in die Zwischenablage kopiert wird:\
+
+
+<Image src="https://blob-cdn.documentation.ai/org-a6cc8753-0b43-40ce-a703-63395282d5e9/doc-c0f47072-8de7-4ddd-b984-93be075ee31b/1776010762650-rxvrxsxzr9-Screenshot-2026-04-12-181813.png?fm=auto&auto=compress%2Cformat" width="2519" height="1265" alt="" />
+
+## In CMD oder PowerShell
+
+```typescript
+cloudflared tunnel --url http://localhost:1234
+
+```
+
+<Image src="https://blob-cdn.documentation.ai/org-a6cc8753-0b43-40ce-a703-63395282d5e9/doc-c0f47072-8de7-4ddd-b984-93be075ee31b/1776010633298-w1yyw3a27f-Screenshot-2026-04-12-181604.png?fm=auto&auto=compress%2Cformat" width="1097" height="616" alt="" />
+
+
+
+## Erwartung
+
+Du bekommst eine URL wie zum Beispiel:
+
+```typescript
+https://irgendwas.trycloudflare.com
+
+```
+
+Bei dir war das:
+
+```typescript
+https://logistics-classified-past-lone.trycloudflare.com
+
+```
+
+## Wichtig
+
+Dieses Fenster **muss offen bleiben**.\
+Wenn du es schließt, ist der Tunnel weg.
+
+---
+
+# 4. Testen, ob der Tunnel funktioniert
+
+## Ohne Auth
+
+```typescript
+Invoke-RestMethod `
+  -Uri "https://DEINE-TRYCLOUDFLARE-URL/v1/models" `
+  -Method Get
+
+```
+
+
+
+<Image src="https://blob-cdn.documentation.ai/org-a6cc8753-0b43-40ce-a703-63395282d5e9/doc-c0f47072-8de7-4ddd-b984-93be075ee31b/1776010812424-p3rd1jwpnu-Screenshot-2026-04-12-181954.png?fm=auto&auto=compress%2Cformat" width="1329" height="1137" alt="" />
+
+## Mit Auth
+
+```typescript
+$token = "DEIN_TOKEN"
+
+Invoke-RestMethod `
+  -Uri "https://DEINE-TRYCLOUDFLARE-URL/v1/models" `
+  -Method Get `
+  -Headers @{ Authorization = "Bearer $token" }
+
+```
+
+Wenn das klappt, ist dein lokales LM Studio von außen erreichbar.
+
+---
+
+# 5. n8n anbinden
+
+## In n8n einen HTTP Request Node anlegen
+
+### Methode
+
+```typescript
+POST
+
+```
+
+### URL
+
+```typescript
+https://DEINE-TRYCLOUDFLARE-URL/v1/chat/completions
+
+```
+
+### Header
+
+Mit Auth:
+
+```typescript
+Authorization: Bearer DEIN_TOKEN
+Content-Type: application/json
+
+```
+
+Ohne Auth:
+
+```typescript
+Content-Type: application/json
+
+```
+
+### Body Type
+
+**JSON**
+
+### Beispiel-Body
+
+```typescript
+{
+  "model": "google/gemma-4-e4b",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Antworte nur mit dem Wort Hallo."
+    }
+  ],
+  "temperature": 0.2
+}
+
+```
+
+---
+
+# 6. Woran du erkennst, dass es funktioniert
+
+n8n sollte ein JSON zurückgeben, in dem ungefähr so etwas steht:
+
+```typescript
+{
+  "choices": [
+    {
+      "message": {
+        "content": "Hallo"
+      }
+    }
+  ]
+}
+
+```
+
+---
+
+# 7. Was du beim nächsten Mal in richtiger Reihenfolge tun musst
+
+## Reihenfolge
+
+1. **LM Studio öffnen**
+
+2. Modell laden
+
+3. **Developer / Local Server starten**
+
+4. ggf. Token bereithalten
+
+5. **cloudflared tunnel --url&#x20;**<a href="http://localhost:1234" target="_blank" rel="noopener noreferrer">**http\://localhost:1234**</a> starten
+
+6. TryCloudflare-URL kopieren
+
+7. In n8n diese URL im HTTP Request Node verwenden
+
+8. Testen
+
+---
+
+# 8. Typische Probleme
+
+## Problem: n8n bekommt keine Antwort
+
+Mögliche Ursachen:
+
+- LM Studio läuft nicht
+
+- Modell nicht geladen
+
+- Server nicht gestartet
+
+- cloudflared-Fenster wurde geschlossen
+
+- Tunnel-URL hat sich geändert
+
+## Problem: 401 Unauthorized
+
+- Token fehlt
+
+- Token falsch
+
+- Authorization-Header falsch geschrieben
+
+## Problem: Modell nicht gefunden
+
+- Modellname im JSON stimmt nicht exakt
+
+## Problem: nach Neustart geht es nicht mehr
+
+- Quick Tunnel erzeugt oft **eine neue URL**
+
+- diese neue URL musst du in n8n wieder eintragen
+
+---
+
+# 9. Wichtige Einschränkung
+
+## Quick Tunnel ist nur für Tests gut
+
+Das ist praktisch, aber nicht stabil für dauerhafte Nutzung.
+
+Das bedeutet:
+
+- URL kann sich ändern
+
+- Tunnel lebt nur, solange das Fenster offen ist
+
+- nicht ideal für produktiven Betrieb
+
+---
+
+# 10. Merksatz für dich
+
+**LM Studio starten → Modell laden → Local Server starten → cloudflared starten → TryCloudflare-URL kopieren → in n8n als Endpoint verwenden.**
+
+---
+
+Wenn du willst, mache ich dir daraus direkt noch eine **ultraknappe Checkliste für Copy-Paste in Obsidian oder Notepad**.

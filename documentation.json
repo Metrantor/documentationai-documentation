@@ -112,6 +112,19 @@
                 "group": "Anwendungs-Oberfläche",
                 "pages": [
                   {
+                    "group": "LLM MOdelle",
+                    "pages": [
+                      {
+                        "title": "NSFW Modelle",
+                        "path": "nsfw-modelle"
+                      },
+                      {
+                        "title": "Lokale Modelle einbinden",
+                        "path": "lokale-modelle-einbinden"
+                      }
+                    ]
+                  },
+                  {
                     "title": "get_main_predecessor_novel",
                     "path": "get-main-predecessor-novel"
                   },
