@@ -1,0 +1,299 @@
+---
+title: render_auracodex_full_from_text
+---
+# `public.render_auracodex_full_from_text(...)`
+
+## Zweck
+
+Diese Funktion erzeugt aus einem Text und einer Serien-ID einen **Aura-Codex-Block**.
+
+Sie berücksichtigt:
+
+- direkte Textreferenzen
+
+- Aliasse
+
+- Exclusions
+
+- rekursive Relationen bis `p_max_relation_depth`
+
+- Super-Codex
+
+Sie berücksichtigt **nicht**:
+
+- Detaileinträge
+
+- Story-State
+
+- Beat-Kontext
+
+- POV
+
+- Zeitfenster
+
+Für den Inhalt der Einträge verwendet sie `overview` statt `description`.
+
+---
+
+## Signatur
+
+```typescript
+public.render_auracodex_full_from_text(
+  p_series_id text,
+  p_text text,
+  p_max_relation_depth integer default 2
+) returns text
+```
+
+---
+
+## Aufrufparameter
+
+| Parameter              | Typ                    | Bedeutung                                                             |
+| ---------------------- | ---------------------- | --------------------------------------------------------------------- |
+| `p_series_id`          | `text`                 | Serie, in deren Codex gesucht wird                                    |
+| `p_text`               | `text`                 | Freitext für das Matching                                             |
+| `p_max_relation_depth` | `integer`, Default `2` | Maximale Rekursionstiefe für die Relationsauflösung im Basis-Matching |
+
+---
+
+## Wie die Funktion arbeitet
+
+### Schritt 1: Basis-Codex bestimmen
+
+Über:
+
+```typescript
+get_matching_codex_ids_from_text(p_series_id, p_text, p_max_relation_depth)
+```
+
+Das liefert:
+
+- &#x20;direkte Treffer&#x20;
+
+- &#x20;Aliasse&#x20;
+
+- &#x20;Exclusions&#x20;
+
+- &#x20;rekursive Relationen&#x20;
+
+### Schritt 2: Super-Codex bestimmen
+
+Über:
+
+```typescript
+get_super_codex_ids(base_ids)
+```
+
+### Schritt 3: Super-Codex filtern
+
+Super-Codex-Ziele werden nochmals gegen Exclusions geprüft.
+
+### Schritt 4: Beide Mengen zusammenführen
+
+Es werden kombiniert:
+
+- &#x20;Basis-Codex&#x20;
+
+- &#x20;Super-Codex&#x20;
+
+Wenn eine ID in beiden vorkommt:
+
+- &#x20;bleibt sie nur einmal erhalten&#x20;
+
+- &#x20;und zwar an der Position der Basis-Menge&#x20;
+
+### Schritt 5: Rendern
+
+Es wird ein Block gebaut mit:
+
+- &#x20;Root = `<auracodex>`&#x20;
+
+- &#x20;pro Eintrag:&#x20;
+
+  - `name`&#x20;
+
+  - `overview`&#x20;
+
+Keine Details.
+
+---
+
+## Beispielaufruf
+
+```typescript
+select public.render_auracodex_full_from_text(
+  '95ea7620-8d91-4fb8-9fb3-82fe78125141',
+  'Captain Sarvin stand auf der Brücke der Kalega. Der Reaktor machte Probleme.',
+  2
+);
+```
+
+---
+
+## Beispielergebnis
+
+```typescript
+<auracodex>
+<codex entry name="Captain Sarvin">
+Captain Sarvin
+Nüchterne und erfahrene Kommandantin der Kalega.
+</codex entry>
+<codex entry name="Kalega">
+Kalega
+Ein altes Frachtschiff mit erfahrenem Kernteam.
+</codex entry>
+<codex entry name="Reaktor">
+Reaktor
+Das zentrale Energie- und Antriebssystem eines Schiffs.
+</codex entry>
+<codex entry name="Schiffsbetrieb">
+Schiffsbetrieb
+Grundlegender Kontext zum Betrieb älterer Frachter.
+</codex entry>
+</auracodex>
+```
+
+# SQL
+
+```typescript
+create or replace function public.render_auracodex_full_from_text(
+  p_series_id text,
+  p_text text,
+  p_max_relation_depth integer default 2
+)
+returns text
+language plpgsql
+stable
+as $function$
+declare
+  v_text_lower text;
+  v_base_ids uuid[];
+  v_super_ids uuid[];
+  v_result text;
+begin
+  if p_series_id is null or btrim(p_series_id) = '' then
+    return '<auracodex>' || E'\n' || '</auracodex>';
+  end if;
+
+  if p_text is null or btrim(p_text) = '' then
+    return '<auracodex>' || E'\n' || '</auracodex>';
+  end if;
+
+  if p_max_relation_depth is null or p_max_relation_depth < 0 then
+    p_max_relation_depth := 2;
+  end if;
+
+  v_text_lower := lower(coalesce(p_text, ''));
+
+  v_base_ids := coalesce(
+    public.get_matching_codex_ids_from_text(
+      p_series_id,
+      p_text,
+      p_max_relation_depth
+    ),
+    '{}'::uuid[]
+  );
+
+  v_super_ids := coalesce(
+    public.get_super_codex_ids(v_base_ids),
+    '{}'::uuid[]
+  );
+
+  with base_ids as (
+    select
+      b.id,
+      b.ord,
+      'base'::text as source_bucket
+    from unnest(v_base_ids) with ordinality as b(id, ord)
+  ),
+  super_ids_raw as (
+    select
+      s.id,
+      s.ord,
+      'super'::text as source_bucket
+    from unnest(v_super_ids) with ordinality as s(id, ord)
+  ),
+  super_ids_filtered as (
+    select
+      s.id,
+      s.ord,
+      s.source_bucket
+    from super_ids_raw s
+    join public.codex_entries ce
+      on ce.id = s.id
+    where ce.is_active = true
+      and not exists (
+        select 1
+        from public.codex_exclusions ex
+        where ex.entry_id = s.id
+          and v_text_lower like '%' || coalesce(ex.normalized_excluded_phrase, lower(ex.excluded_phrase)) || '%'
+      )
+  ),
+  combined as (
+    select *
+    from base_ids
+
+    union all
+
+    select *
+    from super_ids_filtered
+  ),
+  deduped as (
+    select distinct on (c.id)
+      c.id,
+      c.source_bucket,
+      c.ord
+    from combined c
+    order by
+      c.id,
+      case when c.source_bucket = 'base' then 0 else 1 end,
+      c.ord
+  ),
+  final_rows as (
+    select
+      row_number() over (
+        order by
+          case when d.source_bucket = 'base' then 0 else 1 end,
+          d.ord,
+          ce.name
+      ) as final_ord,
+      ce.name,
+      ce.overview
+    from deduped d
+    join public.codex_entries ce
+      on ce.id = d.id
+    where ce.is_active = true
+  ),
+  rendered_entries as (
+    select
+      fr.final_ord,
+      array_to_string(
+        array[
+          format('<codex entry name="%s">', coalesce(fr.name, '')),
+          coalesce(fr.name, ''),
+          coalesce(fr.overview, ''),
+          '</codex entry>'
+        ],
+        E'\n'
+      ) as entry_text
+    from final_rows fr
+  )
+  select array_to_string(
+    array_remove(
+      array[
+        '<auracodex>',
+        (select string_agg(entry_text, E'\n' order by final_ord) from rendered_entries),
+        '</auracodex>'
+      ],
+      null
+    ),
+    E'\n'
+  )
+  into v_result;
+
+  return coalesce(v_result, '<auracodex>' || E'\n' || '</auracodex>');
+end;
+$function$;
+```
+

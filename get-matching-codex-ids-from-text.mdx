@@ -1,54 +1,692 @@
 ---
 title: get_matching_codex_ids_from_text
 ---
-## `public.get_matching_codex_ids_from_text(p_series_id text, p_text text)`
+# `public.get_matching_codex_ids_from_text(...)`
 
-### Zweck
+## Zweck
 
-Ermittelt aus einem freien Text die relevanten **normalen Codex-Eintrags-IDs** einer Serie.
+Diese Funktion untersucht einen freien Text und liefert die passenden **Codex-Eintrags-IDs** einer Serie zurück.
 
-### Was die Funktion fachlich macht
+Sie erkennt:
 
-- durchsucht Codex-Namen
+- direkte Nennungen über `name`
 
-- durchsucht aktive Aliasse
+- direkte Nennungen über `alias`
 
-- prüft Wortgrenzen
-
-- verhindert überlappende Matches
+- berücksichtigt nur aktive und nutzbare Einträge
 
 - berücksichtigt Exclusions
 
-- zieht **direkte** Relationen (`1-Hop`) nach
+- löst Relationen **rekursiv** auf
 
-### Aufrufparameter
+- begrenzt die Rekursion über `p_max_relation_depth`
 
-| Parameter     | Typ    | Bedeutung                              |
-| ------------- | ------ | -------------------------------------- |
-| `p_series_id` | `text` | Serien-ID, in deren Codex gesucht wird |
-| `p_text`      | `text` | Freitext, der analysiert wird          |
+Sie ist die **Basisfunktion für das Textmatching** im System.
 
-### Rückgabewert
+---
 
-| Rückgabe | Typ      | Bedeutung                           |
-| -------- | -------- | ----------------------------------- |
-| Ergebnis | `uuid[]` | Liste relevanter Codex-Eintrags-IDs |
+## Signatur
 
-### Beispiel
+```typescript
+public.get_matching_codex_ids_from_text(
+  p_series_id text,
+  p_text text,
+  p_max_relation_depth integer default 2
+) returns uuid[]
+```
+
+---
+
+## Aufrufparameter
+
+| Parameter              | Typ                    | Bedeutung                                                                                               |
+| ---------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------- |
+| `p_series_id`          | `text`                 | Die Serie, in deren Codex gesucht wird                                                                  |
+| `p_text`               | `text`                 | Der zu analysierende Freitext                                                                           |
+| `p_max_relation_depth` | `integer`, Default `2` | Maximale Tiefe der Relationsauflösung. `0` = keine Relationen, `1` = eine Ebene, `2` = zwei Ebenen usw. |
+
+---
+
+## Rückgabewert
+
+| Rückgabe | Typ      | Bedeutung                              |
+| -------- | -------- | -------------------------------------- |
+| Ergebnis | `uuid[]` | Liste der erkannten Codex-Eintrags-IDs |
+
+---
+
+## Wie die Funktion arbeitet
+
+## Schritt 1: Eingaben prüfen
+
+Wenn `p_series_id` oder `p_text` leer sind, gibt die Funktion sofort ein leeres UUID-Array zurück.
+
+Zusätzlich gilt:
+
+- &#x20;wenn `p_max_relation_depth` `null` oder negativ ist, wird automatisch `2` verwendet&#x20;
+
+---
+
+## Schritt 2: Suchbegriffe laden
+
+Die Funktion lädt für die angegebene Serie:
+
+- `codex_entries.name`&#x20;
+
+- &#x20;aktive `codex_aliases.alias`&#x20;
+
+Es werden nur Einträge berücksichtigt, die:
+
+- `is_active = true`&#x20;
+
+- `track_mentions = true`&#x20;
+
+- `ai_context_mode <> 'never_include'`&#x20;
+
+erfüllen.
+
+---
+
+## Schritt 3: Suchbegriffe normalisieren
+
+Die Begriffe werden bereinigt:
+
+- &#x20;führende und abschließende Leerzeichen werden entfernt&#x20;
+
+- &#x20;Mehrfach-Leerzeichen werden reduziert&#x20;
+
+Dann werden Dubletten bereinigt.
+
+---
+
+## Schritt 4: Begriffe in sinnvoller Reihenfolge prüfen
+
+Die Funktion prüft längere Begriffe zuerst.
+
+Beispiel:
+
+- `Reaktor`&#x20;
+
+- `Reaktor der Kalega`&#x20;
+
+Dann wird zuerst `Reaktor der Kalega` geprüft, damit der spezifischere Treffer gewinnt.
+
+---
+
+## Schritt 5: Direkte Treffer im Text finden
+
+Die Funktion durchsucht den Text nach allen Suchbegriffen und prüft dabei:
+
+- &#x20;Groß-/Kleinschreibung je nach `case_sensitive`&#x20;
+
+- &#x20;Wortgrenzen&#x20;
+
+- &#x20;Überlappungsschutz&#x20;
+
+### Wortgrenzen
+
+Ein Treffer ist nur gültig, wenn links und rechts kein alphanumerisches Zeichen oder `_` direkt anschließt.
+
+### Überlappungsschutz
+
+Bereits belegte Zeichenbereiche werden nicht noch einmal für andere Treffer verwendet.
+
+---
+
+## Schritt 6: Exclusions auf direkte Treffer anwenden
+
+Wenn ein direkt gefundener Codex-Eintrag eine Exclusion-Phrase hat, die im Text vorkommt, wird dieser Eintrag verworfen.
+
+---
+
+## Schritt 7: Direkte Treffer sortieren
+
+Die direkten Treffer werden nach ihrem ersten Auftreten im Text sortiert.
+
+Das ergibt die **Basisreihenfolge** der Ergebnisliste.
+
+---
+
+## Schritt 8: Relationen rekursiv auflösen
+
+Wenn `p_max_relation_depth > 0` ist, werden von den direkten Treffern aus Relationen verfolgt.
+
+Berücksichtigt werden nur Relationen mit:
+
+- `is_active = true`&#x20;
+
+- `pull_into_context = true`&#x20;
+
+Zusätzlich gilt:
+
+- &#x20;Ziel-Eintrag muss `is_active = true` sein&#x20;
+
+- &#x20;Zyklen werden verhindert&#x20;
+
+- &#x20;Rekursion endet bei `p_max_relation_depth`&#x20;
+
+---
+
+## Schritt 9: Exclusions auf rekursive Ziele anwenden
+
+Wenn ein rekursiv erreichtes Ziel durch eine Exclusion gesperrt ist:
+
+- &#x20;wird dieses Ziel **nicht** aufgenommen&#x20;
+
+- &#x20;und **dieser Ast endet dort**&#x20;
+
+Das entspricht der gewünschten Variante B.
+
+---
+
+## Schritt 10: Finale Ergebnisliste bauen
+
+Die Rückgabe besteht aus:
+
+1. &#x20;direkten Treffern in Textreihenfolge&#x20;
+
+2. &#x20;relationell nachgezogenen Treffern&#x20;
+
+Die relationell gezogenen Einträge werden sortiert nach:
+
+- &#x20;Reihenfolge des Root-Treffers&#x20;
+
+- &#x20;Rekursionstiefe&#x20;
+
+- &#x20;Codex-ID als stabiler Tiebreaker&#x20;
+
+---
+
+# Was die Funktion berücksichtigt
+
+## Ja
+
+- `name`&#x20;
+
+- `alias`&#x20;
+
+- `is_active`&#x20;
+
+- `track_mentions`&#x20;
+
+- `ai_context_mode`&#x20;
+
+- &#x20;Wortgrenzen&#x20;
+
+- &#x20;Überlappungsschutz&#x20;
+
+- &#x20;Exclusions&#x20;
+
+- &#x20;rekursive Relationen&#x20;
+
+- &#x20;maximale Relationstiefe&#x20;
+
+## Nein
+
+- `description`&#x20;
+
+- `overview`&#x20;
+
+- `codex_details`&#x20;
+
+- &#x20;Story-State&#x20;
+
+- &#x20;Beat-Kontext&#x20;
+
+- &#x20;POV&#x20;
+
+- &#x20;Zeitfenster&#x20;
+
+Diese Funktion liefert nur die **passenden Haupteintrags-IDs**.
+
+---
+
+# Beispiele
+
+## Beispiel 1: Keine Relationen
 
 ```typescript
 select public.get_matching_codex_ids_from_text(
   '95ea7620-8d91-4fb8-9fb3-82fe78125141',
-  'Der Reaktor der Kalega wurde beschädigt. Captain Sarvin reagierte sofort.'
+  'Captain Sarvin betrat die Brücke der Kalega.',
+  0
 );
 ```
 
-### Typisches Ergebnis
+### Bedeutung
+
+- &#x20;nur direkte Texttreffer&#x20;
+
+- &#x20;keine Relationen&#x20;
+
+### Beispielergebnis
 
 ```typescript
 {
   "11111111-1111-1111-1111-111111111111",
   "22222222-2222-2222-2222-222222222222"
 }
+```
+
+---
+
+## Beispiel 2: Eine Relationsebene
+
+```typescript
+select public.get_matching_codex_ids_from_text(
+  '95ea7620-8d91-4fb8-9fb3-82fe78125141',
+  'Captain Sarvin betrat die Brücke der Kalega.',
+  1
+);
+```
+
+### Bedeutung
+
+- &#x20;direkte Treffer&#x20;
+
+- &#x20;plus direkte Relation-Ziele&#x20;
+
+### Beispielergebnis
+
+```typescript
+{
+  "11111111-1111-1111-1111-111111111111",
+  "22222222-2222-2222-2222-222222222222",
+  "33333333-3333-3333-3333-333333333333"
+}
+```
+
+---
+
+## Beispiel 3: Zwei Relationsebenen
+
+```typescript
+select public.get_matching_codex_ids_from_text(
+  '95ea7620-8d91-4fb8-9fb3-82fe78125141',
+  'Captain Sarvin betrat die Brücke der Kalega.',
+  2
+);
+```
+
+### Bedeutung
+
+- &#x20;direkte Treffer&#x20;
+
+- &#x20;plus rekursive Relationen bis Tiefe 2&#x20;
+
+### Beispielergebnis
+
+```typescript
+{
+  "11111111-1111-1111-1111-111111111111",
+  "22222222-2222-2222-2222-222222222222",
+  "33333333-3333-3333-3333-333333333333",
+  "44444444-4444-4444-4444-444444444444"
+}
+```
+
+---
+
+# Typische Einsatzorte
+
+Diese Funktion wird typischerweise verwendet in:
+
+- `build_full_codex_context_json(...)`&#x20;
+
+- `render_auracodex_full_from_text(...)`&#x20;
+
+Sie ist also ein **zentraler Baustein** im System.
+
+---
+
+# Stärken
+
+- &#x20;robust gegen Teilworttreffer&#x20;
+
+- &#x20;robust gegen überlappende Matches&#x20;
+
+- &#x20;berücksichtigt Aliasse&#x20;
+
+- &#x20;berücksichtigt Exclusions&#x20;
+
+- &#x20;rekursive Relationen steuerbar&#x20;
+
+- &#x20;kontrollierbar über `p_max_relation_depth`&#x20;
+
+---
+
+# Schwächen / Einschränkungen
+
+- &#x20;berücksichtigt noch keinen Beat-Kontext&#x20;
+
+- &#x20;berücksichtigt keinen POV auf Haupteintrags-Ebene&#x20;
+
+- &#x20;Reihenfolge der rekursiven Ziele ist logisch, aber nicht semantisch „intelligent“&#x20;
+
+- &#x20;bei sehr großen Relationsnetzen kann die Funktion schwerer werden&#x20;
+
+- &#x20;Super-Codex ist nicht Teil dieser Funktion, sondern kommt später
+
+# SQL
+
+```typescript
+create or replace function public.get_matching_codex_ids_from_text(
+  p_series_id text,
+  p_text text,
+  p_max_relation_depth integer default 2
+)
+returns uuid[]
+language plpgsql
+stable
+as $function$
+declare
+  r record;
+
+  v_text text;
+  v_text_lower text;
+  v_text_len int;
+
+  v_search_term text;
+  v_search_term_cmp text;
+  v_term_len int;
+
+  v_search_from int;
+  v_rel_pos int;
+  v_start_pos int;
+  v_end_pos int;
+
+  v_before_char text;
+  v_after_char text;
+
+  v_boundary_ok boolean;
+  v_overlaps boolean;
+  v_is_excluded boolean;
+
+  v_occupied int[];
+
+  v_direct_ids uuid[] := '{}'::uuid[];
+  v_direct_pos int[] := '{}'::int[];
+
+  v_final_ids uuid[] := '{}'::uuid[];
+
+  i int;
+  idx int;
+begin
+  if p_series_id is null or btrim(p_series_id) = '' then
+    return '{}'::uuid[];
+  end if;
+
+  if p_text is null or btrim(p_text) = '' then
+    return '{}'::uuid[];
+  end if;
+
+  v_text := p_text;
+  v_text_lower := lower(v_text);
+  v_text_len := char_length(v_text);
+
+  if v_text_len <= 0 then
+    return '{}'::uuid[];
+  end if;
+
+  if p_max_relation_depth is null or p_max_relation_depth < 0 then
+    p_max_relation_depth := 2;
+  end if;
+
+  v_occupied := array_fill(0, array[v_text_len]);
+
+  /*
+    1) Suchbegriffe laden:
+       - Namen
+       - Aliase
+       - nur aktive Einträge/Aliase
+       - nur dieser Serie
+       - nur track_mentions = true
+       - ai_context_mode <> 'never_include'
+       - Dubletten bereinigen
+       - längere Begriffe zuerst
+  */
+  for r in
+    with raw_terms as (
+      select
+        e.id as codex_id,
+        e.case_sensitive,
+        e.name as raw_term
+      from public.codex_entries e
+      where e.series_id = p_series_id
+        and e.is_active = true
+        and e.track_mentions = true
+        and e.ai_context_mode <> 'never_include'
+        and e.name is not null
+
+      union all
+
+      select
+        e.id as codex_id,
+        e.case_sensitive,
+        a.alias as raw_term
+      from public.codex_entries e
+      join public.codex_aliases a
+        on a.entry_id = e.id
+      where e.series_id = p_series_id
+        and e.is_active = true
+        and e.track_mentions = true
+        and e.ai_context_mode <> 'never_include'
+        and a.is_active = true
+        and a.alias is not null
+    ),
+    normalized_terms as (
+      select
+        codex_id,
+        case_sensitive,
+        regexp_replace(btrim(raw_term), '\s+', ' ', 'g') as search_term
+      from raw_terms
+    ),
+    filtered_terms as (
+      select
+        codex_id,
+        search_term,
+        case_sensitive,
+        case
+          when case_sensitive then search_term
+          else lower(search_term)
+        end as dedupe_key
+      from normalized_terms
+      where search_term <> ''
+    ),
+    deduped_terms as (
+      select distinct on (codex_id, dedupe_key, case_sensitive)
+        codex_id,
+        search_term,
+        case_sensitive
+      from filtered_terms
+      order by
+        codex_id,
+        dedupe_key,
+        case_sensitive,
+        char_length(search_term) desc,
+        search_term
+    )
+    select
+      d.codex_id,
+      d.search_term,
+      d.case_sensitive
+    from deduped_terms d
+    order by char_length(d.search_term) desc, d.search_term
+  loop
+    v_search_term := r.search_term;
+    v_term_len := char_length(v_search_term);
+
+    if v_term_len <= 0 then
+      continue;
+    end if;
+
+    if r.case_sensitive then
+      v_search_term_cmp := v_search_term;
+    else
+      v_search_term_cmp := lower(v_search_term);
+    end if;
+
+    v_search_from := 1;
+
+    loop
+      exit when v_search_from > v_text_len;
+
+      if r.case_sensitive then
+        v_rel_pos := strpos(substr(v_text, v_search_from), v_search_term_cmp);
+      else
+        v_rel_pos := strpos(substr(v_text_lower, v_search_from), v_search_term_cmp);
+      end if;
+
+      exit when v_rel_pos = 0;
+
+      v_start_pos := v_search_from + v_rel_pos - 1;
+      v_end_pos := v_start_pos + v_term_len - 1;
+
+      if v_start_pos > 1 then
+        v_before_char := substr(v_text, v_start_pos - 1, 1);
+      else
+        v_before_char := null;
+      end if;
+
+      if v_end_pos < v_text_len then
+        v_after_char := substr(v_text, v_end_pos + 1, 1);
+      else
+        v_after_char := null;
+      end if;
+
+      v_boundary_ok :=
+        (v_before_char is null or v_before_char !~ '[[:alnum:]_]')
+        and
+        (v_after_char is null or v_after_char !~ '[[:alnum:]_]');
+
+      if v_boundary_ok then
+        v_overlaps := false;
+
+        for i in v_start_pos..v_end_pos loop
+          if v_occupied[i] = 1 then
+            v_overlaps := true;
+            exit;
+          end if;
+        end loop;
+
+        if not v_overlaps then
+          select exists (
+            select 1
+            from public.codex_exclusions ex
+            where ex.entry_id = r.codex_id
+              and lower(v_text) like '%' || coalesce(ex.normalized_excluded_phrase, lower(ex.excluded_phrase)) || '%'
+          )
+          into v_is_excluded;
+
+          if not coalesce(v_is_excluded, false) then
+            for i in v_start_pos..v_end_pos loop
+              v_occupied[i] := 1;
+            end loop;
+
+            idx := array_position(v_direct_ids, r.codex_id);
+
+            if idx is null then
+              v_direct_ids := array_append(v_direct_ids, r.codex_id);
+              v_direct_pos := array_append(v_direct_pos, v_start_pos);
+            elsif v_start_pos < v_direct_pos[idx] then
+              v_direct_pos[idx] := v_start_pos;
+            end if;
+          end if;
+        end if;
+      end if;
+
+      v_search_from := v_start_pos + 1;
+    end loop;
+  end loop;
+
+  /*
+    2) Direkte Treffer in Reihenfolge ihres ersten Auftretens übernehmen
+  */
+  if coalesce(array_length(v_direct_ids, 1), 0) > 0 then
+    v_final_ids := array(
+      select v_direct_ids[g.i]
+      from generate_subscripts(v_direct_ids, 1) as g(i)
+      order by v_direct_pos[g.i], g.i
+    );
+  end if;
+
+  /*
+    3) Relationen rekursiv dazuziehen
+       - depth = 0 -> nur direkte Treffer
+       - depth > 0 -> Relationsebenen
+       - Ast endet, wenn ein Ziel excluded ist
+  */
+  if p_max_relation_depth > 0
+     and coalesce(array_length(v_direct_ids, 1), 0) > 0 then
+
+    v_final_ids := v_final_ids || coalesce(
+      (
+        with direct_ordered as (
+          select
+            row_number() over (order by v_direct_pos[g.i], g.i) as root_order,
+            v_direct_ids[g.i] as codex_id
+          from generate_subscripts(v_direct_ids, 1) as g(i)
+        ),
+        rel as (
+          with recursive rel_walk as (
+            select
+              d.root_order,
+              d.codex_id as root_entry_id,
+              d.codex_id,
+              array[d.codex_id] as path,
+              0 as depth
+            from direct_ordered d
+
+            union all
+
+            select
+              rw.root_order,
+              rw.root_entry_id,
+              cr.target_entry_id as codex_id,
+              rw.path || cr.target_entry_id,
+              rw.depth + 1 as depth
+            from rel_walk rw
+            join public.codex_relations cr
+              on cr.source_entry_id = rw.codex_id
+             and cr.is_active = true
+             and cr.pull_into_context = true
+            join public.codex_entries ce_target
+              on ce_target.id = cr.target_entry_id
+             and ce_target.is_active = true
+            where rw.depth < p_max_relation_depth
+              and not (cr.target_entry_id = any(rw.path))
+              and not exists (
+                select 1
+                from public.codex_exclusions ex
+                where ex.entry_id = cr.target_entry_id
+                  and lower(v_text) like '%' || coalesce(ex.normalized_excluded_phrase, lower(ex.excluded_phrase)) || '%'
+              )
+          )
+          select *
+          from rel_walk
+          where depth > 0
+        ),
+        rel_best as (
+          select distinct on (rel.codex_id)
+            rel.codex_id,
+            rel.root_order,
+            rel.depth
+          from rel
+          where array_position(v_final_ids, rel.codex_id) is null
+          order by rel.codex_id, rel.root_order, rel.depth
+        )
+        select array(
+          select rb.codex_id
+          from rel_best rb
+          order by rb.root_order, rb.depth, rb.codex_id
+        )
+      ),
+      '{}'::uuid[]
+    );
+  end if;
+
+  return coalesce(v_final_ids, '{}'::uuid[]);
+end;
+$function$;
 ```
 

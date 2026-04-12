@@ -3,69 +3,143 @@ title: build_full_codex_context_json
 ---
 ## `public.build_full_codex_context_json(p_beat_id uuid, p_text text)`
 
-### Zweck
+# `public.build_full_codex_context_json(...)`
 
-Das ist die große Sammelfunktion, die den kompletten Kontext in **einem Aufruf** baut.
+## Zweck
 
-### Was die Funktion fachlich macht
+Diese Funktion baut den **gesamten Prompt-Kontext** für einen Beat in einem einzigen Aufruf.
 
-- leitet aus `beat_id` selbständig ab:
+Sie liefert:
 
-  - `scene`
+- Standard-Codex
 
-  - `chapter`
+- Super-Codex
 
-  - `novel`
+- Chapter-Codex
 
-  - `series`
+- World-Codex
 
-- erzeugt:
+sowohl als:
 
-  - Standard-Codex
+- ID-Mengen
 
-  - Super-Codex
+- JSONB-Payloads
 
-  - Chapter-Codex
+- gerenderte Prompt-Blöcke
 
-  - World-Codex
+---
 
-- liefert:
+## Signatur
 
-  - ID-Mengen
+```typescript
+public.build_full_codex_context_json(
+  p_beat_id uuid,
+  p_text text,
+  p_max_relation_depth integer default 2
+) returns jsonb
+```
 
-  - Roh-Payloads
+---
 
-  - gerenderte Prompt-Blöcke
+## Aufrufparameter
 
-### Aufrufparameter
+| Parameter              | Typ                    | Bedeutung                                                             |
+| ---------------------- | ---------------------- | --------------------------------------------------------------------- |
+| `p_beat_id`            | `uuid`                 | Beat, aus dem Kapitel und Serie automatisch abgeleitet werden         |
+| `p_text`               | `text`                 | Freitext für das Textmatching                                         |
+| `p_max_relation_depth` | `integer`, Default `2` | Maximale Rekursionstiefe für die Relationsauflösung im Basis-Matching |
 
-| Parameter   | Typ    | Bedeutung                                   |
-| ----------- | ------ | ------------------------------------------- |
-| `p_beat_id` | `uuid` | Beat, aus dem alles Weitere abgeleitet wird |
-| `p_text`    | `text` | Freitext für das Matching                   |
+---
 
-### Rückgabewert
+## Wie die Funktion arbeitet
 
-`jsonb`-Objekt mit den Bereichen:
+### Schritt 1: Beat-Kontext laden
 
-- `input`
+Aus `p_beat_id` werden automatisch geladen:
 
-- `ids`
+- &#x20;Szene&#x20;
 
-- `payloads`
+- &#x20;Kapitel&#x20;
 
-- `rendered`
+- &#x20;Buch&#x20;
 
-### Beispiel
+- &#x20;Serie&#x20;
+
+### Schritt 2: Standard-Basis bestimmen
+
+Über:
+
+```typescript
+get_matching_codex_ids_from_text(series_id, text, p_max_relation_depth)
+```
+
+### Schritt 3: Super-Codex ableiten
+
+Über:
+
+```typescript
+get_super_codex_ids(base_ids)
+```
+
+### Schritt 4: Super-Codex filtern
+
+Super-Codex-Ziele werden nochmals gegen Exclusions geprüft.
+
+### Schritt 5: Standard-Codex bereinigen
+
+Einträge, die im Super-Codex vorkommen, werden aus dem Standard-Codex entfernt.
+
+### Schritt 6: Chapter-Codex bestimmen
+
+Es werden alle am Kapitel verknüpften Codex-Einträge geladen:
+
+- &#x20;nur aktive Einträge&#x20;
+
+- &#x20;Exclusions gegen den Text&#x20;
+
+- &#x20;Dublettenbereinigung gegen Super-Codex&#x20;
+
+### Schritt 7: World-Codex bestimmen
+
+Es werden alle `always_include = true` Codex-Einträge der Serie geladen:
+
+- &#x20;nur aktive Einträge&#x20;
+
+- &#x20;Exclusions gegen den Text&#x20;
+
+- &#x20;Dublettenbereinigung gegen Super-Codex&#x20;
+
+### Schritt 8: Für alle vier Mengen Payloads bauen
+
+Über:
+
+```typescript
+get_prompt_codex_payload_for_beat(...)
+```
+
+### Schritt 9: Für alle vier Mengen Rendering bauen
+
+Über:
+
+```typescript
+render_codex_payload(...)
+```
+
+---
+
+## Beispielaufruf
 
 ```typescript
 select public.build_full_codex_context_json(
   '18f58f5a-a454-4cdc-8a60-7eec80c1b007'::uuid,
-  'Der Reaktor der Kalega versagte. Captain Sarvin blieb ruhig.'
+  'Captain Sarvin stand auf der Brücke der Kalega. Der Reaktor machte Probleme.',
+  2
 );
 ```
 
-### Typisches Ergebnis (gekürzt)
+---
+
+## Beispielergebnis
 
 ```typescript
 {
@@ -100,7 +174,8 @@ select public.build_full_codex_context_json(
 ```typescript
 create or replace function public.build_full_codex_context_json(
   p_beat_id uuid,
-  p_text text
+  p_text text,
+  p_max_relation_depth integer default 2
 )
 returns jsonb
 language plpgsql
@@ -111,6 +186,10 @@ declare
   v_chapter_id uuid;
   v_result jsonb;
 begin
+  if p_max_relation_depth is null or p_max_relation_depth < 0 then
+    p_max_relation_depth := 2;
+  end if;
+
   select
     n.series_id::text,
     ch.id
@@ -137,7 +216,11 @@ begin
   ),
   standard_base as (
     select coalesce(
-      public.get_matching_codex_ids_from_text(v_series_text, coalesce(p_text, '')),
+      public.get_matching_codex_ids_from_text(
+        v_series_text,
+        coalesce(p_text, ''),
+        p_max_relation_depth
+      ),
       '{}'::uuid[]
     ) as ids
   ),
@@ -279,7 +362,8 @@ begin
       'series_id', v_series_text,
       'beat_id', p_beat_id,
       'chapter_id', v_chapter_id,
-      'text', coalesce(p_text, '')
+      'text', coalesce(p_text, ''),
+      'max_relation_depth', p_max_relation_depth
     ),
     'ids', jsonb_build_object(
       'standard_codex_ids', to_jsonb((select ids from standard_final)),

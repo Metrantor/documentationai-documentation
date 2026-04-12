@@ -157,6 +157,10 @@
                     "group": "Codex Erstellung für Prompts",
                     "pages": [
                       {
+                        "title": "ren",
+                        "path": "ren"
+                      },
+                      {
                         "title": "render_aura_codex_from_text",
                         "path": "render-aura-codex-from-text"
                       },
