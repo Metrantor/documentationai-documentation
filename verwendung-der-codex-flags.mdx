@@ -260,4 +260,121 @@ Wenn du willst, mache ich dir daraus als Nächstes noch eine **zweite Matrix nac
 
 - &#x20;Spalten = Funktionen&#x20;
 
-Das wäre noch kompakter als Nachschlagetabelle.
+# &#x20;Nachschlagetabelle
+
+So kannst du sehr schnell sehen:
+
+- **wo** ein Flag greift
+
+- **wie** es greift
+
+- **wo** es nicht greift
+
+- **wo** daraus Probleme entstehen können
+
+---
+
+# Kompakte Matrix nach Flags
+
+| Flag              | Greift direkt in welchen Funktionen?                                                                                                                                                                                                                                        | Greift **nicht** direkt in welchen Funktionen?                                                                                                                                                                              | Was bedeutet das fachlich?                                                                                                                            | Wie für einen 10-Jährigen                                                                                                      | Wo kann es knallen?                                                                                                                                                  |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `is_active`       | `get_matching_codex_ids_from_text`, `get_super_codex_ids` (für Ziel-Einträge), `get_prompt_codex_payload_for_beat`, `get_matching_codex_details_for_beat`, `build_full_codex_context_json` (Chapter/World), `render_auracodex_from_text`, `render_auracodex_full_from_text` | `remove_super_codex_duplicates`, `evaluate_story_variable_condition`, `render_codex_payload`                                                                                                                                | Ein inaktiver Eintrag soll fast überall verschwinden. Das ist der globale Hauptschalter.                                                              | „Wenn der Hauptschalter aus ist, wird die Karte fast überall ignoriert.“                                                       | Wenn ein Eintrag plötzlich nirgends mehr auftaucht, ist `is_active = false` oft die Ursache.                                                                         |
+| `track_mentions`  | `get_matching_codex_ids_from_text`, `render_auracodex_from_text` und dadurch **indirekt** auch Standard-Codex in `build_full_codex_context_json` sowie die Basis in `render_auracodex_full_from_text`                                                                       | `get_super_codex_ids`, `get_prompt_codex_payload_for_beat`, `get_matching_codex_details_for_beat`, Chapter-Codex, World-Codex, `remove_super_codex_duplicates`, `render_codex_payload`, `evaluate_story_variable_condition` | Das Flag steuert **nur**, ob ein Eintrag über Textnennungen gefunden werden darf. Es steuert **nicht**, ob er generell später im Kontext landen darf. | „Der Suchhund hört nur auf Karten mit diesem Häkchen. Andere Karten kann er aber später trotzdem von jemand anderem bekommen.“ | Ein Eintrag kann textlich unsichtbar sein, aber trotzdem über Super-, Chapter- oder World-Codex auftauchen. Das wirkt schnell widersprüchlich.                       |
+| `ai_context_mode` | Direkt nur in `get_matching_codex_ids_from_text` und `render_auracodex_from_text`, dort praktisch nur als Ausschluss von `never_include`; indirekt dadurch Standard-Codex in `build_full_codex_context_json` und Basis in `render_auracodex_full_from_text`                 | `get_super_codex_ids`, `get_prompt_codex_payload_for_beat`, `get_matching_codex_details_for_beat`, Chapter-Codex, World-Codex, `remove_super_codex_duplicates`, `render_codex_payload`, `evaluate_story_variable_condition` | Im aktuellen Stand wird fast nur geprüft: **ist es verboten (**`never_include`**) oder nicht?** Andere Ausprägungen werden nicht fein unterschieden.  | „Das Schild an der Karte wird meistens nur als ‚verboten‘ oder ‚nicht verboten‘ gelesen. Mehr nicht.“                          | Ein Eintrag mit `never_include` kann im Textmatching verschwinden, aber später trotzdem über andere Wege wieder auftauchen. Das ist aktuell die größte Inkonsistenz. |
+
+---
+
+# Noch kompakter: Ja/Nein-Matrix
+
+## `is_active`
+
+| Funktion                              | Nutzt `is_active`? |
+| ------------------------------------- | ------------------ |
+| `get_matching_codex_ids_from_text`    | Ja                 |
+| `get_super_codex_ids`                 | Ja                 |
+| `remove_super_codex_duplicates`       | Nein               |
+| `get_prompt_codex_payload_for_beat`   | Ja                 |
+| `get_matching_codex_details_for_beat` | Ja                 |
+| `evaluate_story_variable_condition`   | Nein               |
+| `build_full_codex_context_json`       | Ja                 |
+| `render_codex_payload`                | Nein               |
+| `render_auracodex_from_text`          | Ja                 |
+| `render_auracodex_full_from_text`     | Ja                 |
+
+---
+
+## `track_mentions`
+
+| Funktion                              | Nutzt `track_mentions`?          |
+| ------------------------------------- | -------------------------------- |
+| `get_matching_codex_ids_from_text`    | Ja                               |
+| `get_super_codex_ids`                 | Nein                             |
+| `remove_super_codex_duplicates`       | Nein                             |
+| `get_prompt_codex_payload_for_beat`   | Nein                             |
+| `get_matching_codex_details_for_beat` | Nein                             |
+| `evaluate_story_variable_condition`   | Nein                             |
+| `build_full_codex_context_json`       | Nur indirekt über Basis-Matching |
+| `render_codex_payload`                | Nein                             |
+| `render_auracodex_from_text`          | Ja                               |
+| `render_auracodex_full_from_text`     | Nur indirekt über Basis-Matching |
+
+---
+
+## `ai_context_mode`
+
+| Funktion                              | Nutzt `ai_context_mode`?                    |
+| ------------------------------------- | ------------------------------------------- |
+| `get_matching_codex_ids_from_text`    | Ja, aber praktisch nur `<> 'never_include'` |
+| `get_super_codex_ids`                 | Nein                                        |
+| `remove_super_codex_duplicates`       | Nein                                        |
+| `get_prompt_codex_payload_for_beat`   | Nein                                        |
+| `get_matching_codex_details_for_beat` | Nein                                        |
+| `evaluate_story_variable_condition`   | Nein                                        |
+| `build_full_codex_context_json`       | Nur indirekt über Basis-Matching            |
+| `render_codex_payload`                | Nein                                        |
+| `render_auracodex_from_text`          | Ja, aber praktisch nur `<> 'never_include'` |
+| `render_auracodex_full_from_text`     | Nur indirekt über Basis-Matching            |
+
+---
+
+# Kurzfazit
+
+## Am konsistentesten
+
+- `is_active`
+
+## Am leichtesten misszuverstehen
+
+- `track_mentions`
+
+## Am unsaubersten bzw. noch nicht vollständig durchgezogen
+
+- `ai_context_mode`
+
+---
+
+# Merksatz
+
+```typescript
+is_active      = darf funktional überhaupt existieren
+track_mentions = darf durch Textsuche gefunden werden
+ai_context_mode = darf in KI-Kontexten verwendet werden
+
+```
+
+Der Haken ist aktuell:
+
+```typescript
+ai_context_mode wird noch nicht überall dort geprüft,
+wo später Codex tatsächlich in KI-Kontext gelangt.
+
+```
+
+Wenn du willst, mache ich dir daraus noch eine **Ampel-Version** mit Farbenlogik, also etwa:
+
+- grün = konsistent genutzt
+
+- gelb = nur teilweise
+
+- rot = problematisch / inkonsistent
+
