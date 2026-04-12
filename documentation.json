@@ -157,7 +157,11 @@
                     "group": "Codex Erstellung für Prompts",
                     "pages": [
                       {
-                        "title": "ren",
+                        "title": "Verwendung der Codex-Flags",
+                        "path": "verwendung-der-codex-flags"
+                      },
+                      {
+                        "title": "render_auracodex_full_from_text",
                         "path": "ren"
                       },
                       {

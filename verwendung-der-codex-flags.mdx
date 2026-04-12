@@ -1,0 +1,263 @@
+Ja. Und die ehrliche Antwort ist: **nein, diese drei Flags werden nicht überall gleich verwendet**.\
+Gerade darin steckt ein Teil der Komplexität.
+
+Ich mache dir zuerst eine **Matrix nach Funktionen**, weil man daran sofort sieht, **wo welches Flag wirklich greift**. Danach noch eine **Kurz-Zusammenfassung je Flag**.
+
+---
+
+# Matrix: Verwendung der Codex-Flags in den relevanten Funktionen
+
+| Funktion                                   | `is_active`                                                                                                                            | `track_mentions`                                                                        | `ai_context_mode`                                                                                 | Warum / warum nicht                                                                                                                                                                                       | Wie für einen 10-Jährigen                                                                                                    | Wo das Probleme machen kann                                                                                                                                                                      |
+| ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `get_matching_codex_ids_from_text(...)`    | **Ja** bei `codex_entries`, **Ja** bei `codex_aliases.is_active`                                                                       | **Ja**                                                                                  | **Ja**, aber nur als Ausschluss von `never_include`                                               | Diese Funktion sucht direkt im Text. Darum filtert sie hier hart: nur aktive, erwähnbare und KI-nutzbare Einträge sollen überhaupt gefunden werden.                                                       | „Der Suchhund darf nur Karten finden, die eingeschaltet sind, gefunden werden dürfen und nicht auf der Verbotsliste stehen.“ | Ein Eintrag kann „unsichtbar“ wirken, obwohl er existiert, wenn eines der drei Felder ungünstig gesetzt ist. Besonders fies: `track_mentions = false` oder `ai_context_mode = never_include`.    |
+| `get_super_codex_ids(...)`                 | **Ja** für das **Ziel** (`target_entry_id`)                                                                                            | **Nein**                                                                                | **Nein**                                                                                          | Hier wird nicht im Text gesucht, sondern nur geprüft, ob Regeln erfüllt sind. Deshalb spielt `track_mentions` hier keine Rolle. `ai_context_mode` wird aktuell auch nicht geprüft.                        | „Hier wird nicht gesucht, sondern gerechnet: Wenn A+B da sind, kommt C dazu.“                                                | Ein Super-Codex-Ziel kann auftauchen, obwohl es textlich nie direkt suchbar wäre. Das kann gewollt sein, aber auch überraschend.                                                                 |
+| `remove_super_codex_duplicates(...)`       | **Nein**                                                                                                                               | **Nein**                                                                                | **Nein**                                                                                          | Diese Funktion macht nur Mengenrechnung: Basis minus Super. Sie schaut nicht inhaltlich auf Einträge.                                                                                                     | „Der Aufräumer schaut nur auf Karten-Nummern, nicht darauf, was auf den Karten steht.“                                       | Wenn vorher schon „falsche“ IDs reinkommen, räumt diese Funktion sie nicht aus inhaltlichen Gründen auf.                                                                                         |
+| `get_prompt_codex_payload_for_beat(...)`   | **Ja** bei `codex_entries`                                                                                                             | **Nein**                                                                                | **Nein**                                                                                          | Hier wird nicht gesucht, sondern aus IDs Inhalt gebaut. Darum ist nur wichtig: ist der Haupteintrag aktiv? `track_mentions` ist dafür egal. `ai_context_mode` wird aktuell nicht mehr geprüft.            | „Wenn die Karte schon ausgewählt wurde, wird nur noch geschaut, ob sie überhaupt noch gültig ist.“                           | Ein Eintrag kann im Payload auftauchen, obwohl er niemals direkt suchbar gewesen wäre. Das ist inkonsistent, wenn man nicht sauber trennt zwischen „finden“ und „darstellen“.                    |
+| `get_matching_codex_details_for_beat(...)` | **Ja** bei `seed_entries`, **Ja** bei Relations-Zielen, **Ja** bei `codex_conditional_entries`, **Ja** bei zugehörigem `codex_entries` | **Nein**                                                                                | **Nein**                                                                                          | Hier geht es um beat-spezifische Details. `track_mentions` ist dafür nicht passend, weil Details nicht über Textsuche kommen. `ai_context_mode` wird aktuell ebenfalls nicht geprüft.                     | „Die Zusatzinfos werden nicht gefunden wie Suchwörter, sondern später aus Regeln geholt.“                                    | Details können erscheinen, obwohl der Haupteintrag textlich eigentlich nie per KI-Kontext gedacht war, wenn du `ai_context_mode` nur im Basismatching beachtest.                                 |
+| `evaluate_story_variable_condition(...)`   | **Nein**                                                                                                                               | **Nein**                                                                                | **Nein**                                                                                          | Diese Funktion kennt nur Werte und Operatoren, keine Codex-Metadaten.                                                                                                                                     | „Die kleine Waage vergleicht nur zwei Dinge. Sie weiß nicht, von welcher Karte sie kommen.“                                  | Keine direkten Flag-Probleme. Aber sie kann indirekt Details freischalten, obwohl das über andere Flags vielleicht gar nicht gewollt war.                                                        |
+| `build_full_codex_context_json(...)`       | **Ja** bei `chapter_codex_entries` über Join auf aktive `codex_entries`; **Ja** bei `world_codex`                                      | **Indirekt Ja**, weil Standard-Basis über `get_matching_codex_ids_from_text(...)` kommt | **Indirekt Ja** im Standard-Codex, **Nein** in Chapter/World direkt                               | Die Funktion selbst nutzt die Flags nicht überall direkt, sondern teilweise über Unterfunktionen. Für Chapter- und World-Codex prüft sie `is_active`, aber nicht `track_mentions` oder `ai_context_mode`. | „Der große Dirigent verlässt sich oft darauf, was seine Helfer schon geprüft haben. Aber nicht immer bei allen Regeln.“      | Hier liegt eine der größten Inkonsistenzen: Chapter- und World-Codex können Einträge reinholen, die textlich nie suchbar wären, weil `track_mentions` oder `ai_context_mode` dort nicht greifen. |
+| `render_codex_payload(...)`                | **Nein**                                                                                                                               | **Nein**                                                                                | **Nein**                                                                                          | Reines Rendering. Es bekommt fertige Daten und baut Text daraus.                                                                                                                                          | „Der Maler malt nur, was man ihm gibt.“                                                                                      | Wenn vorher „falsche“ Inhalte reinkommen, rendert er sie trotzdem brav.                                                                                                                          |
+| `render_auracodex_from_text(...)`          | **Ja** bei `codex_entries`, **Ja** bei `codex_aliases.is_active`                                                                       | **Ja**                                                                                  | **Ja**, aber nur Ausschluss `never_include`                                                       | Diese Funktion ist textnah wie das Basismatching, nur mit `overview` statt `description` und ohne Details. Darum gelten die Such-Flags hier direkt.                                                       | „Das ist ein kleiner Suchhund für den Aura-Codex. Er schaut auf dieselben Suchregeln wie der große Suchhund.“                | Kann genau wie das Basismatching Einträge „verschwinden“ lassen, wenn `track_mentions` oder `ai_context_mode` falsch gesetzt sind.                                                               |
+| `render_auracodex_full_from_text(...)`     | **Ja** indirekt über `get_matching_codex_ids_from_text(...)`, **Ja** nochmal beim finalen Rendern der Einträge                         | **Indirekt Ja** über `get_matching_codex_ids_from_text(...)`                            | **Indirekt Ja** über `get_matching_codex_ids_from_text(...)`, **Nein** im Super-Codex-Teil direkt | Basis-Codex folgt den Textsuchregeln. Der Super-Codex-Teil selbst prüft später nochmal `is_active`, aber nicht `track_mentions` oder `ai_context_mode`.                                                   | „Erst sucht der Suchhund sauber. Dann kommen noch Spezialkarten dazu, und für die gelten nicht ganz dieselben Schranken.“    | Super-Codex-Einträge können im Aura-Codex auftauchen, obwohl sie nie direkt suchbar wären. Das kann okay sein, kann aber auch verwirren.                                                         |
+
+---
+
+# Kurz-Zusammenfassung je Flag
+
+## 1. `is_active`
+
+### Wo wird es wirklich verwendet?
+
+**Fast überall**, und zwar ziemlich konsequent.
+
+Es wird benutzt in:
+
+- `get_matching_codex_ids_from_text(...)`
+
+- `get_prompt_codex_payload_for_beat(...)`
+
+- `get_matching_codex_details_for_beat(...)`
+
+- `get_super_codex_ids(...)` für Ziel-Einträge
+
+- `build_full_codex_context_json(...)` bei Chapter- und World-Codex
+
+- `render_auracodex_from_text(...)`
+
+- `render_auracodex_full_from_text(...)`
+
+### Was bedeutet das?
+
+Wenn ein Eintrag nicht aktiv ist, soll er im Normalfall **nirgendwo mehr auftauchen**.
+
+### Wie für einen 10-Jährigen
+
+„`is_active` ist der Hauptschalter. Wenn der aus ist, tut die Karte so, als wäre sie nicht da.“
+
+### Wo kann das Probleme machen?
+
+Wenn ein Eintrag „plötzlich verschwindet“, ist `is_active = false` oft der erste Verdächtige.
+
+---
+
+## 2. `track_mentions`
+
+### Wo wird es wirklich verwendet?
+
+**Nur in textnahen Suchfunktionen**:
+
+- `get_matching_codex_ids_from_text(...)`
+
+- `render_auracodex_from_text(...)`
+
+- indirekt über diese auch in:
+
+  - `build_full_codex_context_json(...)` für den Standard-Codex
+
+  - `render_auracodex_full_from_text(...)` für die Basis-Menge
+
+### Wo wird es **nicht** verwendet?
+
+Nicht in:
+
+- `get_super_codex_ids(...)`
+
+- `get_prompt_codex_payload_for_beat(...)`
+
+- `get_matching_codex_details_for_beat(...)`
+
+- Chapter-Codex
+
+- World-Codex
+
+### Was bedeutet das?
+
+`track_mentions` entscheidet vor allem:
+
+> Darf der Eintrag **über Textnennungen** überhaupt gefunden werden?
+
+Es entscheidet **nicht**:
+
+> Darf der Eintrag später generell im Kontext erscheinen?
+
+### Wie für einen 10-Jährigen
+
+„`track_mentions` sagt nur, ob der Suchhund auf diese Karte überhaupt hören soll, wenn ihr Name im Text vorkommt.“
+
+### Wo kann das Probleme machen?
+
+Ein Eintrag kann:
+
+- **nicht direkt gefunden** werden,
+
+- aber **trotzdem später auftauchen**,
+
+  - z. B. über Chapter-Codex
+
+  - World-Codex
+
+  - Super-Codex
+
+  - explizite ID-Übergabe
+
+Das wirkt dann oft „inkonsequent“, ist aber technisch gerade so gebaut.
+
+---
+
+## 3. `ai_context_mode`
+
+### Welche Ausprägung wird aktuell wirklich verwendet?
+
+In deinen gezeigten Funktionen wird aktuell nur diese Ausprägung **explizit** behandelt:
+
+- `never_include`
+
+Und zwar als Ausschlussbedingung:
+
+```typescript
+ai_context_mode <> 'never_include'
+```
+
+### Was heißt das praktisch?
+
+Alles außer `never_include` wird im Basismatching behandelt, also z. B. wohl auch:
+
+- `include_when_detected`&#x20;
+
+- &#x20;eventuell andere Werte&#x20;
+
+Aber:\
+&#x20;Die Funktionen unterscheiden diese anderen Werte **nicht weiter**. Sie behandeln sie nur implizit als „nicht verboten“.
+
+### Wo wird `ai_context_mode` wirklich verwendet?
+
+Direkt in:
+
+- `get_matching_codex_ids_from_text(...)`&#x20;
+
+- `render_auracodex_from_text(...)`&#x20;
+
+Indirekt dadurch in:
+
+- &#x20;Standard-Codex in `build_full_codex_context_json(...)`&#x20;
+
+- &#x20;Basisanteil in `render_auracodex_full_from_text(...)`&#x20;
+
+### Wo wird es **nicht** verwendet?
+
+Nicht in:
+
+- `get_super_codex_ids(...)`&#x20;
+
+- `get_prompt_codex_payload_for_beat(...)`&#x20;
+
+- `get_matching_codex_details_for_beat(...)`&#x20;
+
+- &#x20;Chapter-Codex&#x20;
+
+- &#x20;World-Codex&#x20;
+
+### Wie für einen 10-Jährigen
+
+„`ai_context_mode` ist ein Schild an der Karte. Im Moment liest der Suchhund eigentlich nur:\
+&#x20;**‚verboten‘** oder **‚nicht verboten‘**.\
+&#x20;Mehr Feinheiten schaut er sich gerade noch nicht an.“
+
+### Wo kann das Probleme machen?
+
+Ganz klar hier:
+
+- &#x20;Ein Eintrag mit `ai_context_mode = never_include` wird im **Textmatching** nicht gefunden.&#x20;
+
+- &#x20;Derselbe Eintrag kann aber **später trotzdem** auftauchen,&#x20;
+
+  - &#x20;wenn er über Chapter-Codex&#x20;
+
+  - &#x20;World-Codex&#x20;
+
+  - &#x20;Super-Codex&#x20;
+
+  - &#x20;oder direkte ID-Weitergabe reinkommt&#x20;
+
+Das ist aktuell eine der wichtigsten Inkonsistenzen im System.
+
+---
+
+# Ehrliches Fazit
+
+## `is_active`
+
+Ist der **harte globale Hauptschalter**.\
+&#x20;Das ist am saubersten umgesetzt.
+
+## `track_mentions`
+
+Ist ein **Such-Schalter**, kein globaler Sichtbarkeits-Schalter.\
+&#x20;Das ist fachlich okay, aber man muss es bewusst so verstehen.
+
+## `ai_context_mode`
+
+Ist aktuell **nur halb ausgenutzt**.\
+&#x20;Praktisch heißt es im Moment oft nur:
+
+- `never_include` = nein&#x20;
+
+- &#x20;alles andere = vielleicht ja&#x20;
+
+Genau da steckt noch Unschärfe.
+
+---
+
+# Meine nüchterne Bewertung, wo die größten Stolperstellen liegen
+
+| Flag              | Stolperrisiko | Warum                                                                             |
+| ----------------- | ------------- | --------------------------------------------------------------------------------- |
+| `is_active`       | mittel        | klar definiert, aber wenn falsch gesetzt, verschwindet alles                      |
+| `track_mentions`  | hoch          | Nutzer erwarten oft fälschlich, dass es globale Sichtbarkeit steuert              |
+| `ai_context_mode` | sehr hoch     | wird derzeit nur teilweise ausgewertet und nicht konsistent über alle Wege hinweg |
+
+---
+
+# Mein praktischer Rat
+
+Wenn du die Komplexität wirklich einhegen willst, dann denke intern so:
+
+- `is_active` = **existiert funktional**&#x20;
+
+- `track_mentions` = **darf durch Textsuche gefunden werden**&#x20;
+
+- `ai_context_mode` = **darf grundsätzlich in KI-Kontexten landen**&#x20;
+
+Und dann wäre die saubere langfristige Frage:
+
+> Soll `ai_context_mode = never_include` **wirklich überall** gelten?
+
+Aktuell lautet die ehrliche Antwort: **nein, nicht überall**.
+
+Wenn du willst, mache ich dir daraus als Nächstes noch eine **zweite Matrix nach Flags statt nach Funktionen**, also:
+
+- &#x20;Zeilen = `is_active`, `track_mentions`, `ai_context_mode`&#x20;
+
+- &#x20;Spalten = Funktionen&#x20;
+
+Das wäre noch kompakter als Nachschlagetabelle.
