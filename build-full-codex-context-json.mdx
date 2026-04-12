@@ -1,6 +1,102 @@
 ---
-title: vlt_veraltet_build_full_codex_context_json
+title: build_full_codex_context_json
 ---
+## `public.build_full_codex_context_json(p_beat_id uuid, p_text text)`
+
+### Zweck
+
+Das ist die große Sammelfunktion, die den kompletten Kontext in **einem Aufruf** baut.
+
+### Was die Funktion fachlich macht
+
+- leitet aus `beat_id` selbständig ab:
+
+  - `scene`
+
+  - `chapter`
+
+  - `novel`
+
+  - `series`
+
+- erzeugt:
+
+  - Standard-Codex
+
+  - Super-Codex
+
+  - Chapter-Codex
+
+  - World-Codex
+
+- liefert:
+
+  - ID-Mengen
+
+  - Roh-Payloads
+
+  - gerenderte Prompt-Blöcke
+
+### Aufrufparameter
+
+| Parameter   | Typ    | Bedeutung                                   |
+| ----------- | ------ | ------------------------------------------- |
+| `p_beat_id` | `uuid` | Beat, aus dem alles Weitere abgeleitet wird |
+| `p_text`    | `text` | Freitext für das Matching                   |
+
+### Rückgabewert
+
+`jsonb`-Objekt mit den Bereichen:
+
+- `input`
+
+- `ids`
+
+- `payloads`
+
+- `rendered`
+
+### Beispiel
+
+```typescript
+select public.build_full_codex_context_json(
+  '18f58f5a-a454-4cdc-8a60-7eec80c1b007'::uuid,
+  'Der Reaktor der Kalega versagte. Captain Sarvin blieb ruhig.'
+);
+```
+
+### Typisches Ergebnis (gekürzt)
+
+```typescript
+{
+  "input": {
+    "series_id": "95ea7620-8d91-4fb8-9fb3-82fe78125141",
+    "beat_id": "18f58f5a-a454-4cdc-8a60-7eec80c1b007",
+    "chapter_id": "..."
+  },
+  "ids": {
+    "standard_codex_ids": ["..."],
+    "super_codex_ids": ["..."],
+    "chapter_codex_ids": ["..."],
+    "world_codex_ids": ["..."]
+  },
+  "payloads": {
+    "standard_codex": [...],
+    "super_codex": [...],
+    "chapter_codex": [...],
+    "world_codex": [...]
+  },
+  "rendered": {
+    "standard_codex": "<codex>...</codex>",
+    "super_codex": "<super codex>...</super codex>",
+    "chapter_codex": "<chapter codex>...</chapter codex>",
+    "world_codex": "<world codex>...</world codex>"
+  }
+}
+```
+
+# SQL
+
 ```typescript
 create or replace function public.build_full_codex_context_json(
   p_beat_id uuid,
@@ -15,11 +111,6 @@ declare
   v_chapter_id uuid;
   v_result jsonb;
 begin
-  /*
-    Beat-Kontext laden:
-    - Serie
-    - Kapitel
-  */
   select
     n.series_id::text,
     ch.id
@@ -44,30 +135,18 @@ begin
       coalesce(p_text, '') as raw_text,
       lower(coalesce(p_text, '')) as text_lower
   ),
-
-  /*
-    1) Standard-Basis aus Text
-  */
   standard_base as (
     select coalesce(
       public.get_matching_codex_ids_from_text(v_series_text, coalesce(p_text, '')),
       '{}'::uuid[]
     ) as ids
   ),
-
-  /*
-    2) Super-Codex
-  */
   super_raw as (
     select coalesce(
       public.get_super_codex_ids((select ids from standard_base)),
       '{}'::uuid[]
     ) as ids
   ),
-
-  /*
-    3) Super-Codex um Exclusions bereinigen
-  */
   super_filtered as (
     with super_input as (
       select distinct unnest((select ids from super_raw)) as codex_id
@@ -91,10 +170,6 @@ begin
       '{}'::uuid[]
     ) as ids
   ),
-
-  /*
-    4) Standard-Codex um Super-Dubletten bereinigen
-  */
   standard_final as (
     select coalesce(
       public.remove_super_codex_duplicates(
@@ -104,10 +179,6 @@ begin
       '{}'::uuid[]
     ) as ids
   ),
-
-  /*
-    5) Chapter-Codex
-  */
   chapter_base as (
     select coalesce(
       array(
@@ -129,7 +200,6 @@ begin
       '{}'::uuid[]
     ) as ids
   ),
-
   chapter_final as (
     select coalesce(
       public.remove_super_codex_duplicates(
@@ -139,10 +209,6 @@ begin
       '{}'::uuid[]
     ) as ids
   ),
-
-  /*
-    6) World-Codex
-  */
   world_base as (
     select coalesce(
       array(
@@ -163,7 +229,6 @@ begin
       '{}'::uuid[]
     ) as ids
   ),
-
   world_final as (
     select coalesce(
       public.remove_super_codex_duplicates(
@@ -173,10 +238,6 @@ begin
       '{}'::uuid[]
     ) as ids
   ),
-
-  /*
-    7) Payloads
-  */
   standard_payload as (
     select coalesce(
       public.get_prompt_codex_payload_for_beat(
@@ -213,7 +274,6 @@ begin
       '[]'::jsonb
     ) as payload
   )
-
   select jsonb_build_object(
     'input', jsonb_build_object(
       'series_id', v_series_text,

@@ -1,0 +1,417 @@
+---
+title: render_auracodex_from_text
+---
+# public.render\_auracodex\_from\_text(p\_series\_id text, p\_text text)
+
+# Zweck
+
+Die Funktion erzeugt aus einem Text einen **kompakten Aura-Codex-Block** mit direkt referenzierten Codex-Einträgen einer Serie.
+
+Verwendet werden:
+
+- `name`
+
+- `alias`
+
+- `overview`
+
+Nicht verwendet werden:
+
+- `description`
+
+- `codex_details`
+
+- Beat-Kontext
+
+- Story-State
+
+- Relationen
+
+---
+
+# Funktionsname
+
+Ich schlage vor:
+
+```typescript
+public.render_auracodex_from_text(p_series_id text, p_text text)
+```
+
+---
+
+# Aufrufparameter
+
+| Parameter     | Typ    | Bedeutung                                            |
+| ------------- | ------ | ---------------------------------------------------- |
+| `p_series_id` | `text` | Serie, in deren Codex gesucht wird                   |
+| `p_text`      | `text` | Freitext, der nach Namen und Aliasen durchsucht wird |
+
+---
+
+# Rückgabewert
+
+| Rückgabe | Typ    | Bedeutung                                      |
+| -------- | ------ | ---------------------------------------------- |
+| Ergebnis | `text` | gerenderter `<auracodex>...</auracodex>`-Block |
+
+---
+
+# Beispielaufruf
+
+```typescript
+select public.render_auracodex_from_text(
+  '95ea7620-8d91-4fb8-9fb3-82fe78125141',
+  'Captain Sarvin stand auf der Brücke der Kalega und beobachtete den Reaktor.'
+);
+```
+
+---
+
+# Beispielergebnis
+
+```typescript
+<auracodex>
+<codex entry name="Captain Sarvin">
+Captain Sarvin
+Nüchterne und erfahrene Kommandantin der Kalega.
+</codex entry>
+<codex entry name="Kalega">
+Kalega
+Ein altes Frachtschiff mit erfahrenem Kernteam.
+</codex entry>
+<codex entry name="Reaktor">
+Reaktor
+Das zentrale Energie- und Antriebssystem eines Schiffs.
+</codex entry>
+</aura
+codex>
+```
+
+Hinweise
+
+# Hinweise zur Funktion
+
+## Sie berücksichtigt
+
+- `codex_entries.is_active = true`
+
+- `codex_entries.track_mentions = true`
+
+- `codex_entries.ai_context_mode <> 'never_include'`
+
+- aktive Aliasse
+
+- Exclusions
+
+## Sie berücksichtigt **nicht**
+
+- `codex_details`
+
+- `description`
+
+- `get_prompt_codex_payload_for_beat(...)`
+
+- Beat-Kontext
+
+- Story-State
+
+- POV
+
+- Relationen
+
+---
+
+# Warum ich sie so gebaut habe
+
+Folgendes war gefordert
+
+- **nur direkte Textreferenzen**
+
+- **ohne Detailprüfung**
+
+- **overview statt description**
+
+- **Pseudo-HTML wie bei&#x20;**`render_codex_payload`
+
+- **Root =&#x20;**`auracodex`
+
+# SQL
+
+```typescript
+create or replace function public.render_auracodex_from_text(
+  p_series_id text,
+  p_text text
+)
+returns text
+language plpgsql
+stable
+as $function$
+declare
+  r record;
+
+  v_text text;
+  v_text_lower text;
+  v_text_len int;
+
+  v_search_term text;
+  v_search_term_cmp text;
+  v_term_len int;
+
+  v_search_from int;
+  v_rel_pos int;
+  v_start_pos int;
+  v_end_pos int;
+
+  v_before_char text;
+  v_after_char text;
+
+  v_boundary_ok boolean;
+  v_overlaps boolean;
+  v_is_excluded boolean;
+
+  v_occupied int[];
+
+  v_direct_ids uuid[] := '{}'::uuid[];
+  v_direct_pos int[] := '{}'::int[];
+
+  idx int;
+  i int;
+
+  v_result text;
+begin
+  if p_series_id is null or btrim(p_series_id) = '' then
+    return '<auracodex>' || E'\n' || '</auracodex>';
+  end if;
+
+  if p_text is null or btrim(p_text) = '' then
+    return '<auracodex>' || E'\n' || '</auracodex>';
+  end if;
+
+  v_text := p_text;
+  v_text_lower := lower(v_text);
+  v_text_len := char_length(v_text);
+
+  if v_text_len <= 0 then
+    return '<auracodex>' || E'\n' || '</auracodex>';
+  end if;
+
+  v_occupied := array_fill(0, array[v_text_len]);
+
+  /*
+    1) Suchbegriffe laden:
+       - Namen
+       - Aliase
+       - nur aktive Einträge/Aliase
+       - nur dieser Serie
+       - nur track_mentions = true
+       - ai_context_mode <> 'never_include'
+       - Dubletten bereinigen
+       - längere Begriffe zuerst
+  */
+  for r in
+    with raw_terms as (
+      select
+        e.id as codex_id,
+        e.case_sensitive,
+        e.name as raw_term
+      from public.codex_entries e
+      where e.series_id = p_series_id
+        and e.is_active = true
+        and e.track_mentions = true
+        and e.ai_context_mode <> 'never_include'
+        and e.name is not null
+
+      union all
+
+      select
+        e.id as codex_id,
+        e.case_sensitive,
+        a.alias as raw_term
+      from public.codex_entries e
+      join public.codex_aliases a
+        on a.entry_id = e.id
+      where e.series_id = p_series_id
+        and e.is_active = true
+        and e.track_mentions = true
+        and e.ai_context_mode <> 'never_include'
+        and a.is_active = true
+        and a.alias is not null
+    ),
+    normalized_terms as (
+      select
+        codex_id,
+        case_sensitive,
+        regexp_replace(btrim(raw_term), '\s+', ' ', 'g') as search_term
+      from raw_terms
+    ),
+    filtered_terms as (
+      select
+        codex_id,
+        search_term,
+        case_sensitive,
+        case
+          when case_sensitive then search_term
+          else lower(search_term)
+        end as dedupe_key
+      from normalized_terms
+      where search_term <> ''
+    ),
+    deduped_terms as (
+      select distinct on (codex_id, dedupe_key, case_sensitive)
+        codex_id,
+        search_term,
+        case_sensitive
+      from filtered_terms
+      order by
+        codex_id,
+        dedupe_key,
+        case_sensitive,
+        char_length(search_term) desc,
+        search_term
+    )
+    select
+      d.codex_id,
+      d.search_term,
+      d.case_sensitive
+    from deduped_terms d
+    order by char_length(d.search_term) desc, d.search_term
+  loop
+    v_search_term := r.search_term;
+    v_term_len := char_length(v_search_term);
+
+    if v_term_len <= 0 then
+      continue;
+    end if;
+
+    if r.case_sensitive then
+      v_search_term_cmp := v_search_term;
+    else
+      v_search_term_cmp := lower(v_search_term);
+    end if;
+
+    v_search_from := 1;
+
+    loop
+      exit when v_search_from > v_text_len;
+
+      if r.case_sensitive then
+        v_rel_pos := strpos(substr(v_text, v_search_from), v_search_term_cmp);
+      else
+        v_rel_pos := strpos(substr(v_text_lower, v_search_from), v_search_term_cmp);
+      end if;
+
+      exit when v_rel_pos = 0;
+
+      v_start_pos := v_search_from + v_rel_pos - 1;
+      v_end_pos := v_start_pos + v_term_len - 1;
+
+      if v_start_pos > 1 then
+        v_before_char := substr(v_text, v_start_pos - 1, 1);
+      else
+        v_before_char := null;
+      end if;
+
+      if v_end_pos < v_text_len then
+        v_after_char := substr(v_text, v_end_pos + 1, 1);
+      else
+        v_after_char := null;
+      end if;
+
+      v_boundary_ok :=
+        (v_before_char is null or v_before_char !~ '[[:alnum:]_]')
+        and
+        (v_after_char is null or v_after_char !~ '[[:alnum:]_]');
+
+      if v_boundary_ok then
+        v_overlaps := false;
+
+        for i in v_start_pos..v_end_pos loop
+          if v_occupied[i] = 1 then
+            v_overlaps := true;
+            exit;
+          end if;
+        end loop;
+
+        if not v_overlaps then
+          /*
+            Exclusions auf direktem Match prüfen.
+            Wenn eine Exclusion-Phrase des Eintrags im Text vorkommt,
+            wird der Eintrag nicht aufgenommen.
+          */
+          select exists (
+            select 1
+            from public.codex_exclusions ex
+            where ex.entry_id = r.codex_id
+              and lower(v_text) like '%' || coalesce(ex.normalized_excluded_phrase, lower(ex.excluded_phrase)) || '%'
+          )
+          into v_is_excluded;
+
+          if not coalesce(v_is_excluded, false) then
+            for i in v_start_pos..v_end_pos loop
+              v_occupied[i] := 1;
+            end loop;
+
+            idx := array_position(v_direct_ids, r.codex_id);
+
+            if idx is null then
+              v_direct_ids := array_append(v_direct_ids, r.codex_id);
+              v_direct_pos := array_append(v_direct_pos, v_start_pos);
+            elsif v_start_pos < v_direct_pos[idx] then
+              v_direct_pos[idx] := v_start_pos;
+            end if;
+          end if;
+        end if;
+      end if;
+
+      v_search_from := v_start_pos + 1;
+    end loop;
+  end loop;
+
+  /*
+    2) Ergebnis rendern:
+       - nur direkt referenzierte IDs
+       - overview statt description
+       - keine Details
+       - Root-Tag = auracodex
+       - Reihenfolge nach erstem Auftreten im Text
+  */
+  with ordered_ids as (
+    select v_direct_ids[g.i] as codex_id
+    from generate_subscripts(v_direct_ids, 1) as g(i)
+    order by v_direct_pos[g.i], g.i
+  ),
+  rendered_entries as (
+    select
+      row_number() over () as ord,
+      array_to_string(
+        array[
+          format('<codex entry name="%s">', coalesce(ce.name, '')),
+          coalesce(ce.name, ''),
+          coalesce(ce.overview, ''),
+          '</codex entry>'
+        ],
+        E'\n'
+      ) as entry_text
+    from ordered_ids oi
+    join public.codex_entries ce
+      on ce.id = oi.codex_id
+    where ce.is_active = true
+  )
+  select array_to_string(
+    array_remove(
+      array[
+        '<auracodex>',
+        (select string_agg(entry_text, E'\n' order by ord) from rendered_entries),
+        '</auracodex>'
+      ],
+      null
+    ),
+    E'\n'
+  )
+  into v_result;
+
+  return coalesce(v_result, '<auracodex>' || E'\n' || '</auracodex>');
+end;
+$function$;
+```
+

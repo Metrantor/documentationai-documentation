@@ -157,19 +157,59 @@
                     "group": "Codex Erstellung für Prompts",
                     "pages": [
                       {
+                        "title": "render_aura_codex_from_text",
+                        "path": "render-aura-codex-from-text"
+                      },
+                      {
+                        "title": "Verweise zum Story Beat",
+                        "path": "verweise-zum-story-beat"
+                      },
+                      {
                         "title": "Beschreibung",
                         "path": "beschreibung"
+                      },
+                      {
+                        "title": "build_full_codex_context_json",
+                        "path": "build-full-codex-context-json"
+                      },
+                      {
+                        "title": "render_codex_payload",
+                        "path": "render-codex-payload"
+                      },
+                      {
+                        "title": "evaluate_story_variable_condition",
+                        "path": "evaluate-story-variable-condition"
+                      },
+                      {
+                        "title": "get_matching_codex_details_for_beat",
+                        "path": "get-matching-codex-details-for-beat"
+                      },
+                      {
+                        "title": "get_prompt_codex_payload_for_beat",
+                        "path": "get-prompt-codex-payload-for-beat"
+                      },
+                      {
+                        "title": "remove_super_codex_duplicates",
+                        "path": "remove-super-codex-duplicates"
+                      },
+                      {
+                        "title": "get_super_codex_ids",
+                        "path": "get-super-codex-ids"
+                      },
+                      {
+                        "title": "get_matching_codex_ids_from_text",
+                        "path": "get-matching-codex-ids-from-text"
                       },
                       {
                         "title": "Aufruf und Ergebnisse",
                         "path": "auufruf-und-ergebnisse"
                       },
                       {
-                        "title": "render_codex_payload",
+                        "title": "vlt_veraltet_render_codex_payload",
                         "path": "hilffunktion"
                       },
                       {
-                        "title": "build_full_codex_context_json",
+                        "title": "vlt_veraltet_build_full_codex_context_json",
                         "path": "coder-erstellung-fr-propmt"
                       }
                     ]
@@ -192,6 +232,10 @@
                       {
                         "title": "Story State Funktionen (Supabase)",
                         "path": "story-state-funktionen-supabase"
+                      },
+                      {
+                        "title": "get_story_state_at_beat",
+                        "path": "get-story-state-at-beat"
                       }
                     ]
                   },

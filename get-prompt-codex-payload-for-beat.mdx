@@ -1,0 +1,121 @@
+---
+title: get_prompt_codex_payload_for_beat
+---
+## `public.get_prompt_codex_payload_for_beat(p_codex_entry_ids uuid[], p_beat_id uuid)`
+
+### Zweck
+
+Erzeugt für eine Menge von Codex-Einträgen und einen Beat den **Prompt-Payload**.
+
+### Was die Funktion fachlich macht
+
+- nimmt die Haupteinträge
+
+- ermittelt passende `codex_details`
+
+- baut pro Eintrag ein JSON-Objekt mit:
+
+  - `codex_title`
+
+  - `codex_text`
+
+  - `codex_details`
+
+### Aufrufparameter
+
+| Parameter           | Typ      | Bedeutung                    |
+| ------------------- | -------- | ---------------------------- |
+| `p_codex_entry_ids` | `uuid[]` | Liste von Codex-Eintrags-IDs |
+| `p_beat_id`         | `uuid`   | Beat-Kontext                 |
+
+### Rückgabewert
+
+| Rückgabe | Typ     | Bedeutung                              |
+| -------- | ------- | -------------------------------------- |
+| Ergebnis | `jsonb` | JSONB-Array mit Prompt-Codex-Einträgen |
+
+### Beispiel
+
+```typescript
+select public.get_prompt_codex_payload_for_beat(
+  array[
+    '11111111-1111-1111-1111-111111111111'::uuid
+  ],
+  'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'::uuid
+);
+```
+
+### Typisches Ergebnis
+
+```typescript
+[
+  {
+    "codex_title": "Kalega",
+    "codex_text": "Ein altes Frachtschiff.",
+    "codex_details": [
+      "Der Reaktor ist instabil.",
+      "Captain Sarvin ist vorsichtig."
+    ]
+  }
+]
+```
+
+# SQL
+
+```typescript
+create or replace function public.get_prompt_codex_payload_for_beat(
+  p_codex_entry_ids uuid[],
+  p_beat_id uuid
+)
+returns jsonb
+language sql
+stable
+as $function$
+with input_ids as (
+  select unnest(p_codex_entry_ids) as codex_entry_id
+),
+matched_details as (
+  select *
+  from public.get_matching_codex_details_for_beat(
+    p_codex_entry_ids,
+    p_beat_id
+  )
+),
+grouped_details as (
+  select
+    md.codex_entry_id,
+    jsonb_agg(
+      md.codex_text
+      order by md.sort_order, md.title
+    ) as codex_details
+  from matched_details md
+  group by md.codex_entry_id
+),
+final_rows as (
+  select
+    ce.id as codex_entry_id,
+    ce.name as codex_title,
+    ce.description as codex_text,
+    coalesce(gd.codex_details, '[]'::jsonb) as codex_details
+  from input_ids i
+  join public.codex_entries ce
+    on ce.id = i.codex_entry_id
+  left join grouped_details gd
+    on gd.codex_entry_id = ce.id
+  where ce.is_active = true
+)
+select coalesce(
+  jsonb_agg(
+    jsonb_build_object(
+      'codex_title', fr.codex_title,
+      'codex_text', fr.codex_text,
+      'codex_details', fr.codex_details
+    )
+    order by fr.codex_title
+  ),
+  '[]'::jsonb
+)
+from final_rows fr;
+$function$;
+```
+

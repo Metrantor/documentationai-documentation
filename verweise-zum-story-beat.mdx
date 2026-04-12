@@ -1,0 +1,14 @@
+---
+title: Verweise zum Story Beat
+---
+# Indirekt beteiligte Funktion
+
+## `public.get_story_state_at_beat(p_beat_id uuid, p_mode text)`
+
+### Rolle
+
+Diese Funktion wird **indirekt** von `get_matching_codex_details_for_beat(...)` verwendet, um den Story-State am Beat zu laden.
+
+### Warum sie wichtig ist
+
+Ohne sie können Bedingungen auf Variablenwerte nicht ausgewertet werden.
