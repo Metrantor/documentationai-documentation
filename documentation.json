@@ -112,7 +112,34 @@
                 "group": "Anwendungs-Oberfläche",
                 "pages": [
                   {
-                    "group": "LLM MOdelle",
+                    "group": "Medienerstellung",
+                    "pages": [
+                      {
+                        "group": "Jogg.ai",
+                        "pages": [
+                          {
+                            "title": "ElevenLabs V3",
+                            "path": "elevenlabs-v3"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "group": "Autorenprofile",
+                    "pages": [
+                      {
+                        "title": "Kompakter Autoren-View",
+                        "path": "kompakter-autoren-view"
+                      },
+                      {
+                        "title": "Datenstrukturen",
+                        "path": "datenstrukturen"
+                      }
+                    ]
+                  },
+                  {
+                    "group": "LLM Modelle",
                     "pages": [
                       {
                         "title": "NSFW Modelle",
@@ -131,6 +158,19 @@
                   {
                     "group": "Aura Canvas",
                     "pages": [
+                      {
+                        "group": "n8n API Aufrufe",
+                        "pages": [
+                          {
+                            "title": "Bedeutung der Canvas Übergabeparameter  an API",
+                            "path": "bedeutung-der-canvas-bergabeparameter-an-api"
+                          },
+                          {
+                            "title": "Kapitelentwurf erstellen",
+                            "path": "kapitelentwurf-erstellen"
+                          }
+                        ]
+                      },
                       {
                         "title": "Aura Prompt-Aufba",
                         "path": "aura-prompt-aufba"

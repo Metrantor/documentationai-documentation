@@ -1,0 +1,101 @@
+```typescript
+create or replace view public.v_author_profiles_compact as
+select
+  ap.id,
+  ap.name,
+  ap.slug,
+  ap.motto,
+  ap.image_url,
+  ap.description,
+  ap.version,
+  ap.is_active,
+  ap.is_default,
+  ap.sort_order,
+  ap.metadata,
+  ap.created_at,
+  ap.updated_at,
+
+  coalesce(
+    (
+      select jsonb_agg(
+        jsonb_build_object(
+          'id', ass.id,
+          'title', ass.title,
+          'injection_text', ass.injection_text,
+          'sample_text', ass.sample_text,
+          'distilled_text', ass.distilled_text,
+          'notes', ass.notes,
+          'version', ass.version,
+          'is_active', ass.is_active,
+          'last_distilled_at', ass.last_distilled_at,
+          'metadata', ass.metadata,
+          'created_at', ass.created_at,
+          'updated_at', ass.updated_at
+        )
+        order by ass.is_active desc, ass.created_at asc
+      )
+      from public.author_style_sheets ass
+      where ass.author_profile_id = ap.id
+    ),
+    '[]'::jsonb
+  ) as style_sheets,
+
+  coalesce(
+    (
+      select jsonb_agg(
+        jsonb_build_object(
+          'id', aem.id,
+          'mode_key', aem.mode_key,
+          'name', aem.name,
+          'description', aem.description,
+          'injection_text', aem.injection_text,
+          'sample_text', aem.sample_text,
+          'distilled_text', aem.distilled_text,
+          'notes', aem.notes,
+          'version', aem.version,
+          'sort_order', aem.sort_order,
+          'is_active', aem.is_active,
+          'last_distilled_at', aem.last_distilled_at,
+          'metadata', aem.metadata,
+          'created_at', aem.created_at,
+          'updated_at', aem.updated_at
+        )
+        order by aem.sort_order asc, aem.name asc
+      )
+      from public.author_emotion_modes aem
+      where aem.author_profile_id = ap.id
+    ),
+    '[]'::jsonb
+  ) as emotion_modes,
+
+  coalesce(
+    (
+      select jsonb_agg(
+        jsonb_build_object(
+          'id', app.id,
+          'pattern_type', app.pattern_type,
+          'name', app.name,
+          'description', app.description,
+          'injection_text', app.injection_text,
+          'sample_text', app.sample_text,
+          'distilled_text', app.distilled_text,
+          'notes', app.notes,
+          'version', app.version,
+          'sort_order', app.sort_order,
+          'is_active', app.is_active,
+          'last_distilled_at', app.last_distilled_at,
+          'metadata', app.metadata,
+          'created_at', app.created_at,
+          'updated_at', app.updated_at
+        )
+        order by app.pattern_type asc, app.sort_order asc, app.name asc
+      )
+      from public.author_prompt_patterns app
+      where app.author_profile_id = ap.id
+    ),
+    '[]'::jsonb
+  ) as prompt_patterns
+
+from public.author_profiles ap;
+```
+

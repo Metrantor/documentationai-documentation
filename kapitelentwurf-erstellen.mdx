@@ -1,0 +1,95 @@
+welche Werte an den Webhook `https://casper001.duckdns.org/webhook/CreateChapterDraft` übergeben werden, woher sie stammen und wie sie ermittelt werden.
+
+\
+Die Daten für diesen API-Aufruf werden hauptsächlich durch die Funktion `buildChapterFunctionPayload` aufbereitet.&#x20;
+
+Diese Funktion analysiert den aktuellen Zustand des Canvas und extrahiert relevante Informationen aus dem ausgewählten Kapitel-Knoten und seinen Verbindungen.
+
+\
+Hier ist eine detaillierte Aufschlüsselung der Werte, die an den `CreateChapterDraft` Webhook übergeben werden:
+
+\
+**1.&#x20;**`series_id`&#x20;
+
+**Woher:** Stammt aus dem globalen `activeSeriesId` aus dem `useAppStore` Hook. \* **Was es beinhaltet:** Die eindeutige Kennung der aktuell ausgewählten Romanserie. \* **Wie ermittelt:** Wird aus dem globalen Zustand der Anwendung gelesen, der die aktuell ausgewählte Serie repräsentiert.\
+
+
+**2.&#x20;**`nsfw`&#x20;
+
+**Woher:** Stammt aus `blob.canvas.properties.nsfw`.&#x20;
+
+&#x20;**Was es beinhaltet:** Ein Boolean-Wert, der angibt, ob NSFW (Not Safe For Work) Inhalte für die Generierung erlaubt sind.&#x20;
+
+**Wie ermittelt:** Wird aus den globalen Canvas-Einstellungen gelesen, die wahrscheinlich vom Benutzer in den Canvas-Eigenschaften gesetzt wurden.\
+
+
+**3.&#x20;**`seed`&#x20;
+
+**Woher:** Wird von `buildChapterFunctionPayload` aus `chapterNode.data.ideaText` extrahiert.&#x20;
+
+**Was es beinhaltet:** Der Hauptgedanke oder die Idee für das Kapitel, die als Grundlage für die KI-Generierung dient.&#x20;
+
+**Wie ermittelt:** Der Wert aus dem Feld `ideaText` des Chapter Nodes. Wenn dieses Feld leer ist, ist der Wert ein leerer String.
+
+\
+**4.&#x20;**`prompt`&#x20;
+
+**Woher:** Wird von `buildChapterFunctionPayload` aus `chapterNode.data.promptText` extrahiert.&#x20;
+
+**Was es beinhaltet:** Der spezifische Prompt-Text, der an die KI gesendet wird, um den Kapitelentwurf zu generieren.&#x20;
+
+**Wie ermittelt:** Der Wert aus dem Feld `promptText` des Chapter Nodes.\
+
+
+**5.&#x20;**`ideas`&#x20;
+
+**Woher:** Wird von `buildChapterFunctionPayload` durch Traversierung der eingehenden Kanten vom Typ `ideas_in` generiert. Für jeden verbundenen Ideen-Knoten werden spezifische Felder extrahiert.&#x20;
+
+**Was es beinhaltet:** Ein Array von Objekten, die Details zu den verbundenen Ideen enthalten. Jedes Objekt enthält: `sourceNodeId`, `sourceNodeType` (z. B. `idea_node`), `sourceHandle`, `label`, `text` (extrahiert aus dem Ideen-Knoten) und den vollständigen `node`-Objekt.&#x20;
+
+**Wie ermittelt:** Analyse der Verbindungen (Edges) im Canvas-Zustand, die auf das `ideas_in`-Handle eines Chapter Nodes zeigen, und Extraktion der relevanten Daten aus den Quellknoten (`IdeaNode`).\
+
+
+**6.&#x20;**`codex`&#x20;
+
+&#x20;**Woher:** Wird von `buildChapterFunctionPayload` durch Traversierung der eingehenden Kanten vom Typ `codex_in` generiert. Für jeden verbundenen Codex-Knoten werden spezifische Felder extrahiert.&#x20;
+
+**Was es beinhaltet:** Ein Array von Objekten, die Details zu den verbundenen Codex-Einträgen enthalten. Jedes Objekt enthält: `sourceNodeId`, `sourceNodeType` (z. B. `codex_node`), `sourceHandle`, `label`, `title`, `overview` (aus dem Codex-Eintrag) und den vollständigen `node`.&#x20;
+
+**Wie ermittelt:** Analyse der Verbindungen (Edges) im Canvas-Zustand, die auf das `codex_in`-Handle eines Chapter Nodes zeigen, und Extraktion der relevanten Daten aus den Quellknoten (`CodexNode`).\
+
+
+**7.&#x20;**`story-flow`&#x20;
+
+**Woher:** Wird von `buildChapterFunctionPayload` durch Traversierung der eingehenden Kanten vom Typ `story_flow_in` generiert.&#x20;
+
+**Was es beinhaltet:** Ein Array von Objekten, die Informationen über die direkten Vorgänger im Story Flow enthalten. Diese beinhalten `sourceNodeId`, `sourceNodeType`, `sourceHandle`, `label`, `mode` (z.B. `text`, `draft`, `summary`), den jeweiligen Text (`text`, `synopsis`, `draftText`, `draftDescription`) und das vollständige `node`-Objekt.&#x20;
+
+**Wie ermittelt:** Analyse der Verbindungen (Edges) im Canvas-Zustand, die auf das `story_flow_in`-Handle eines Chapter Nodes zeigen, und Extraktion der relevanten Daten aus den Quellknoten (`ChapterNode`).\
+
+
+**8.&#x20;**`completeSummary`&#x20;
+
+**Woher:** Wird von `buildChapterFunctionPayload` rekursiv durch Traversierung aller Vorgänger über `story_flow_in`-Kanten ermittelt.&#x20;
+
+**Was es beinhaltet:** Ein Array von Zusammenfassungen aller vorgeschalteten Kapitel in der Story-Flow-Kette. Jedes Element enthält die `chapterNodeId`, `chapterId`, `chapterNumber`, das `label` und die `synopsis` des jeweiligen Vorgängers.&#x20;
+
+**Wie ermittelt:** Eine rekursive Funktion, die vom aktuell ausgewählten Kapitel aus rückwärts entlang der `story_flow_in`-Kanten navigiert und die `summary`-Daten der besuchten Kapitel sammelt.\
+
+
+**9.&#x20;**`predecessorHandoffs`&#x20;
+
+**Woher:** Wird von `buildChapterFunctionPayload` durch Analyse der unmittelbaren Vorgänger (nur die ersten Schritte in der `story_flow_in`-Kette) ermittelt.&#x20;
+
+**Was es beinhaltet:** Ein Array von Objekten, die Informationen über die \\"Handoffs\\" von direkten Vorgängern enthalten (`chapterNodeId`, `chapterId`, `chapterNumber`, `label`, `handoff`-Text).&#x20;
+
+**Wie ermittelt:** Ähnlich wie `completeSummary`, aber nur für die direkten Vorgänger und es werden die Handoff-Texte extrahiert, die in `chapterNode.data.handoff` gespeichert sind.\
+
+
+**10.&#x20;**`instructionsDraft`&#x20;
+
+**Woher:** Wird direkt aus dem Kapitel-Node gelesen: `chapterNode.data.instructionsDraft`.&#x20;
+
+**Was es beinhaltet:** Spezifische Anweisungen, die der Benutzer direkt in das \\"Anweisungen\\"-Feld des Kapitel-Nodes eingegeben hat, speziell für die Erstellung eines Drafts.&#x20;
+
+**Wie ermittelt:** Direkte Abfrage des entsprechenden Datenfeldes
