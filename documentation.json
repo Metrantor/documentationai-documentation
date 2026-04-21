@@ -105,29 +105,28 @@
                         "path": "get-main-predecessor-chapter"
                       }
                     ]
-                  }
-                ]
-              },
-              {
-                "group": "Anwendungs-Oberfläche",
-                "pages": [
-                  {
-                    "title": "get_prompt_history_context",
-                    "path": "get-prompt-history-context"
                   },
                   {
-                    "group": "Story Context Aggregation V2",
+                    "group": "Story Context Aggregation V3",
                     "pages": [
+                      {
+                        "title": "Beschreibung Context-Aggrgation",
+                        "path": "beschreibung-context-aggrgation"
+                      },
                       {
                         "title": "Zusammenfassung der Platzhalter",
                         "path": "zusammenfassung-der-platzhalter"
+                      },
+                      {
+                        "title": "get_prompt_payload_context",
+                        "path": "get-prompt-payload-context"
                       },
                       {
                         "title": "get_prompt_chapter_beat_context",
                         "path": "get-prompt-chapter-beat-context"
                       },
                       {
-                        "title": "n_get_relevant_inflow_chapters",
+                        "title": "get_relevant_inflow_chapters",
                         "path": "n-get-relevant-inflow-chapters"
                       },
                       {
@@ -137,8 +136,26 @@
                       {
                         "title": "get_story_context_target",
                         "path": "n_get_story_context_target"
+                      },
+                      {
+                        "group": "Komfort-Aggregatfunktionen",
+                        "pages": [
+                          {
+                            "title": "get_full_prompt_payload_with_codex",
+                            "path": "get-full-prompt-payload-with-codex"
+                          }
+                        ]
                       }
                     ]
+                  }
+                ]
+              },
+              {
+                "group": "Anwendungs-Funktionen",
+                "pages": [
+                  {
+                    "title": "get_prompt_history_context",
+                    "path": "get-prompt-history-context"
                   },
                   {
                     "group": "Medienerstellung",
@@ -243,68 +260,78 @@
                     "group": "Codex Erstellung für Prompts",
                     "pages": [
                       {
-                        "title": "Verwendung der Codex-Flags",
-                        "path": "verwendung-der-codex-flags"
+                        "group": "Codex-Context-Erstellung für Aura Canvas",
+                        "pages": [
+                          {
+                            "title": "render_auracodex_full_from_text",
+                            "path": "ren"
+                          },
+                          {
+                            "title": "render_aura_codex_from_text",
+                            "path": "render-aura-codex-from-text"
+                          }
+                        ]
                       },
                       {
-                        "title": "render_auracodex_full_from_text",
-                        "path": "ren"
-                      },
-                      {
-                        "title": "render_aura_codex_from_text",
-                        "path": "render-aura-codex-from-text"
-                      },
-                      {
-                        "title": "Verweise zum Story Beat",
-                        "path": "verweise-zum-story-beat"
-                      },
-                      {
-                        "title": "Beschreibung",
-                        "path": "beschreibung"
-                      },
-                      {
-                        "title": "build_full_codex_context_json",
-                        "path": "build-full-codex-context-json"
-                      },
-                      {
-                        "title": "render_codex_payload",
-                        "path": "render-codex-payload"
-                      },
-                      {
-                        "title": "evaluate_story_variable_condition",
-                        "path": "evaluate-story-variable-condition"
-                      },
-                      {
-                        "title": "get_matching_codex_details_for_beat",
-                        "path": "get-matching-codex-details-for-beat"
-                      },
-                      {
-                        "title": "get_prompt_codex_payload_for_beat",
-                        "path": "get-prompt-codex-payload-for-beat"
-                      },
-                      {
-                        "title": "remove_super_codex_duplicates",
-                        "path": "remove-super-codex-duplicates"
-                      },
-                      {
-                        "title": "get_super_codex_ids",
-                        "path": "get-super-codex-ids"
-                      },
-                      {
-                        "title": "get_matching_codex_ids_from_text",
-                        "path": "get-matching-codex-ids-from-text"
-                      },
-                      {
-                        "title": "Aufruf und Ergebnisse",
-                        "path": "auufruf-und-ergebnisse"
-                      },
-                      {
-                        "title": "vlt_veraltet_render_codex_payload",
-                        "path": "hilffunktion"
-                      },
-                      {
-                        "title": "vlt_veraltet_build_full_codex_context_json",
-                        "path": "coder-erstellung-fr-propmt"
+                        "group": "Codex-Context-Erstellung für Beats",
+                        "pages": [
+                          {
+                            "title": "Beschreibung",
+                            "path": "beschreibung"
+                          },
+                          {
+                            "title": "Verwendung der Codex-Flags",
+                            "path": "verwendung-der-codex-flags"
+                          },
+                          {
+                            "title": "Verweise zum Story Beat",
+                            "path": "verweise-zum-story-beat"
+                          },
+                          {
+                            "title": "build_full_codex_context_json",
+                            "path": "build-full-codex-context-json"
+                          },
+                          {
+                            "title": "render_codex_payload",
+                            "path": "render-codex-payload"
+                          },
+                          {
+                            "title": "evaluate_story_variable_condition",
+                            "path": "evaluate-story-variable-condition"
+                          },
+                          {
+                            "title": "get_matching_codex_details_for_beat",
+                            "path": "get-matching-codex-details-for-beat"
+                          },
+                          {
+                            "title": "get_prompt_codex_payload_for_beat",
+                            "path": "get-prompt-codex-payload-for-beat"
+                          },
+                          {
+                            "title": "remove_super_codex_duplicates",
+                            "path": "remove-super-codex-duplicates"
+                          },
+                          {
+                            "title": "get_super_codex_ids",
+                            "path": "get-super-codex-ids"
+                          },
+                          {
+                            "title": "get_matching_codex_ids_from_text",
+                            "path": "get-matching-codex-ids-from-text"
+                          },
+                          {
+                            "title": "Aufruf und Ergebnisse",
+                            "path": "auufruf-und-ergebnisse"
+                          },
+                          {
+                            "title": "vlt_veraltet_render_codex_payload",
+                            "path": "hilffunktion"
+                          },
+                          {
+                            "title": "vlt_veraltet_build_full_codex_context_json",
+                            "path": "coder-erstellung-fr-propmt"
+                          }
+                        ]
                       }
                     ]
                   },

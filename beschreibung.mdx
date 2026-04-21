@@ -1,32 +1,38 @@
+---
+title: Beschreibung
+---
 # Technische Dokumentation
 
 ## Codex-, Super-Codex- und Prompt-Kontext-System in Supabase
 
-Diese Dokumentation beschreibt die in Supabase abgebildeten Funktionen und ihre Zusammenarbeit als Gesamtsystem.  
+Diese Dokumentation beschreibt die in Supabase abgebildeten Funktionen und ihre Zusammenarbeit als Gesamtsystem.\
 Die zugrunde liegende n8n-Orchestrierung und die ursprüngliche Matching-Idee mit Längensortierung, Wortgrenzen und Überlappungsschutz stammen aus den bereitgestellten Workflow- und Matching-Unterlagen.
 
-***
+---
 
 ## 1. Wozu das System da ist
 
 Das System hat ein einziges großes Ziel:
 
->   Aus einem Text und einem Beat automatisch genau die Codex-Informationen ziehen, die für diesen Moment der Geschichte nützlich sind.
+> Aus einem Text und einem Beat automatisch genau die Codex-Informationen ziehen, die für diesen Moment der Geschichte nützlich sind.
 
 Dabei werden vier Kontextarten getrennt aufgebaut:
 
--   **Standard-Codex**  
-    normale Einträge aus Text, Aliasen und Relationen
--   **Super-Codex**  
-    zusätzliche Einträge, die erst dann entstehen, wenn bestimmte andere Einträge gemeinsam vorkommen
--   **Chapter-Codex**  
-    manuell an einem Kapitel verknüpfte Einträge
--   **World-Codex**  
-    globale Serien-Einträge, etwa über `always_include = true`
+- **Standard-Codex**\
+  normale Einträge aus Text, Aliasen und Relationen
+
+- **Super-Codex**\
+  zusätzliche Einträge, die erst dann entstehen, wenn bestimmte andere Einträge gemeinsam vorkommen
+
+- **Chapter-Codex**\
+  manuell an einem Kapitel verknüpfte Einträge
+
+- **World-Codex**\
+  globale Serien-Einträge, etwa über `always_include = true`
 
 Am Ende bekommt das Modell nicht einfach „den ganzen Codex“, sondern fein portioniertes Kontextwissen.
 
-***
+---
 
 ## 2. Das System ganz einfach erklärt
 
@@ -36,21 +42,30 @@ Jede Wissenskarte ist ein Codex-Eintrag.
 
 Wenn du einen Text eingibst, macht das System ungefähr Folgendes:
 
-1.  Es liest den Text.
-2.  Es schaut: „Welche Karten werden hier direkt erwähnt?“
-3.  Es schaut: „Welche Karten hängen mit diesen Karten zusammen?“
-4.  Es schaut: „Wenn A und B gemeinsam vorkommen, muss dann noch Karte C dazukommen?“
-5.  Es schaut: „Welche Extra-Infos zu diesen Karten sind **genau jetzt** erlaubt?“
-6.  Es baut daraus mehrere ordentliche Stapel:
-    -   normaler Codex
-    -   Super-Codex
-    -   Kapitel-Codex
-    -   Welt-Codex
+1. Es liest den Text.
 
-Das ist die ganze Idee.  
+2. Es schaut: „Welche Karten werden hier direkt erwähnt?“
+
+3. Es schaut: „Welche Karten hängen mit diesen Karten zusammen?“
+
+4. Es schaut: „Wenn A und B gemeinsam vorkommen, muss dann noch Karte C dazukommen?“
+
+5. Es schaut: „Welche Extra-Infos zu diesen Karten sind **genau jetzt** erlaubt?“
+
+6. Es baut daraus mehrere ordentliche Stapel:
+
+   - normaler Codex
+
+   - Super-Codex
+
+   - Kapitel-Codex
+
+   - Welt-Codex
+
+Das ist die ganze Idee.\
 Nur technisch eben mit Funktionen, Filtern und Regeln.
 
-***
+---
 
 ## 3. Architekturdiagramm
 
@@ -109,12 +124,12 @@ build_full_codex_context_json(beat_id, text)
             └─ <world codex>
 ```
 
-***
+---
 
 ## 4. Hauptfähigkeiten des Systems
 
 | Fähigkeit             | Beschreibung                                                             |
-|-----------------------|--------------------------------------------------------------------------|
+| --------------------- | ------------------------------------------------------------------------ |
 | Textmatching          | Erkennt Codex-Einträge direkt aus Freitext                               |
 | Alias-System          | Erkennt Einträge auch über alternative Namen                             |
 | Exclusions            | Unterdrückt Einträge, wenn Sperrphrasen im Text vorkommen                |
@@ -127,12 +142,12 @@ build_full_codex_context_json(beat_id, text)
 | Prompt-Trennung       | Standard-, Super-, Kapitel- und Welt-Codex bleiben getrennt              |
 | Ein-Call-Verarbeitung | Der gesamte Kontext kann in einem einzigen Supabase-Aufruf gebaut werden |
 
-***
+---
 
 ## 5. Wichtige Einschränkungen
 
 | Bereich                                 | Einschränkung                                                                                 |
-|-----------------------------------------|-----------------------------------------------------------------------------------------------|
+| --------------------------------------- | --------------------------------------------------------------------------------------------- |
 | `get_matching_codex_ids_from_text(...)` | löst Relationen nur **eine Ebene tief** auf                                                   |
 | Super-Codex                             | unterstützt aktuell nur `all_required`                                                        |
 | Haupteinträge vs. POV                   | POV wird derzeit auf **Details**, nicht auf ganze Codex-Haupteinträge angewendet              |
@@ -140,11 +155,11 @@ build_full_codex_context_json(beat_id, text)
 | Debugbarkeit                            | ohne zusätzliche Debug-Ausgaben können komplexe Regelketten schwer nachzuvollziehen sein      |
 | Rendering in SQL                        | praktisch, aber enger an das Promptformat gekoppelt                                           |
 
-***
+---
 
 ## 6. Die Funktionen im Überblick
 
-***
+---
 
 # 6.1 `get_matching_codex_ids_from_text(p_series_id text, p_text text) -> uuid[]`
 
@@ -154,45 +169,53 @@ Diese Funktion ist der erste Suchhund.
 
 Sie schaut in einen Text und sagt:
 
->   „Diese Codex-Einträge habe ich darin gefunden oder direkt mitgezogen.“
+> „Diese Codex-Einträge habe ich darin gefunden oder direkt mitgezogen.“
 
 ## Eingaben
 
 | Parameter     | Typ    | Bedeutung                         |
-|---------------|--------|-----------------------------------|
+| ------------- | ------ | --------------------------------- |
 | `p_series_id` | `text` | Serie, in der gesucht werden soll |
 | `p_text`      | `text` | Text, der analysiert wird         |
 
 ## Ausgabe
 
 | Typ      | Bedeutung                           |
-|----------|-------------------------------------|
+| -------- | ----------------------------------- |
 | `uuid[]` | Liste gefundener Codex-Eintrags-IDs |
 
 ## Was sie kann
 
--   Namen durchsuchen
--   Aliasse durchsuchen
--   leere Begriffe ignorieren
--   längere Begriffe zuerst prüfen
--   Wortgrenzen beachten
--   überlappende Treffer vermeiden
--   Exclusions beachten
--   direkte Relationen ergänzen
+- Namen durchsuchen
+
+- Aliasse durchsuchen
+
+- leere Begriffe ignorieren
+
+- längere Begriffe zuerst prüfen
+
+- Wortgrenzen beachten
+
+- überlappende Treffer vermeiden
+
+- Exclusions beachten
+
+- direkte Relationen ergänzen
 
 ## Wie sie arbeitet, ganz einfach erklärt
 
 ### Schritt 1: Ist überhaupt etwas da?
 
-Wenn `series_id` oder `text` leer sind, sagt sie sofort:  
+Wenn `series_id` oder `text` leer sind, sagt sie sofort:\
 „Dann kann ich auch nichts finden.“
 
 ### Schritt 2: Alle Suchbegriffe einsammeln
 
 Sie sammelt:
 
--   den eigentlichen Namen eines Codex-Eintrags
--   alle aktiven Aliasse
+- den eigentlichen Namen eines Codex-Eintrags
+
+- alle aktiven Aliasse
 
 ### Schritt 3: Begriffe sauber machen
 
@@ -202,19 +225,22 @@ Sie schneidet überflüssige Leerzeichen weg und macht doppelte Begriffe sauber.
 
 Wenn es z. B. gibt:
 
--   `Reaktor`
--   `Reaktor der Kalega`
+- `Reaktor`
 
-dann wird erst der lange Begriff geprüft.  
+- `Reaktor der Kalega`
+
+dann wird erst der lange Begriff geprüft.\
 Das ist gut, weil der präzisere Treffer zuerst gewinnen soll.
 
 ### Schritt 5: Im Text suchen
 
 Die Funktion schaut dann Begriff für Begriff nach:
 
--   steht der Begriff im Text?
--   beginnt und endet er an einer „sauberen Wortkante“?
--   ist dieser Bereich nicht schon von einem anderen Treffer belegt?
+- steht der Begriff im Text?
+
+- beginnt und endet er an einer „sauberen Wortkante“?
+
+- ist dieser Bereich nicht schon von einem anderen Treffer belegt?
 
 ### Schritt 6: Exclusions prüfen
 
@@ -228,16 +254,18 @@ Für die direkt gefundenen IDs schaut die Funktion in `codex_relations` nach Zie
 
 Sie ist robust gegen:
 
--   Alias-Varianten
--   Teilworttreffer
--   doppelte und überlappende Matches
+- Alias-Varianten
+
+- Teilworttreffer
+
+- doppelte und überlappende Matches
 
 ## Wichtige Schwäche
 
-Sie zieht Relationen nur **einmal** nach.  
+Sie zieht Relationen nur **einmal** nach.\
 Wenn A B zieht und B C, dann kommt C hier noch nicht automatisch mit.
 
-***
+---
 
 # 6.2 `get_super_codex_ids(p_base_codex_ids uuid[]) -> uuid[]`
 
@@ -247,18 +275,18 @@ Diese Funktion macht aus normalem Codex einen „schlauen“ Codex.
 
 Sie fragt:
 
->   „Wenn bestimmte Einträge gemeinsam da sind — muss ich dann noch einen zusätzlichen Eintrag dazunehmen?“
+> „Wenn bestimmte Einträge gemeinsam da sind — muss ich dann noch einen zusätzlichen Eintrag dazunehmen?“
 
 ## Eingabe
 
 | Parameter          | Typ      | Bedeutung       |
-|--------------------|----------|-----------------|
+| ------------------ | -------- | --------------- |
 | `p_base_codex_ids` | `uuid[]` | Basis-Codex-IDs |
 
 ## Ausgabe
 
 | Typ      | Bedeutung                        |
-|----------|----------------------------------|
+| -------- | -------------------------------- |
 | `uuid[]` | zusätzliche Super-Codex-Ziel-IDs |
 
 ## Wie sie arbeitet
@@ -271,15 +299,17 @@ Sie entfernt Duplikate.
 
 Sie schaut in:
 
--   `codex_super_rules`
--   `codex_super_rule_triggers`
+- `codex_super_rules`
+
+- `codex_super_rule_triggers`
 
 ### Schritt 3: Zählen
 
 Für jede Regel zählt sie:
 
--   wie viele Trigger nötig sind
--   wie viele davon tatsächlich vorhanden sind
+- wie viele Trigger nötig sind
+
+- wie viele davon tatsächlich vorhanden sind
 
 ### Schritt 4: Nur vollständige Regeln nehmen
 
@@ -289,9 +319,11 @@ Eine Regel greift nur, wenn **alle** Trigger da sind.
 
 Wenn du sagst:
 
--   A
--   B
--   C
+- A
+
+- B
+
+- C
 
 lösen gemeinsam X aus,
 
@@ -305,7 +337,7 @@ Sehr sauber für kombinatorische Spezialkontexte.
 
 Aktuell nur **UND-Logik**, keine ODER-Gruppen, keine Mindestanzahl, keine Negativtrigger.
 
-***
+---
 
 # 6.3 `remove_super_codex_duplicates(p_base_codex_ids uuid[], p_super_codex_ids uuid[]) -> uuid[]`
 
@@ -315,27 +347,28 @@ Diese Funktion räumt auf.
 
 Sie sagt:
 
->   „Wenn eine ID im normalen Codex und im Super-Codex vorkommt, soll sie nur noch im Super-Codex bleiben.“
+> „Wenn eine ID im normalen Codex und im Super-Codex vorkommt, soll sie nur noch im Super-Codex bleiben.“
 
 ## Eingaben
 
 | Parameter           | Typ      |
-|---------------------|----------|
+| ------------------- | -------- |
 | `p_base_codex_ids`  | `uuid[]` |
 | `p_super_codex_ids` | `uuid[]` |
 
 ## Ausgabe
 
 | Typ      | Bedeutung                     |
-|----------|-------------------------------|
+| -------- | ----------------------------- |
 | `uuid[]` | bereinigte Standard-Codex-IDs |
 
 ## Ganz einfach erklärt
 
 Stell dir zwei Kisten vor:
 
--   Standard
--   Super
+- Standard
+
+- Super
 
 Wenn dieselbe Karte in beiden Kisten liegt, wird sie aus der Standard-Kiste rausgenommen.
 
@@ -347,7 +380,7 @@ Die Prompt-Struktur wird klarer und ohne Dubletten.
 
 Die Priorisierung ist fest: **Super gewinnt immer**.
 
-***
+---
 
 # 6.4 `get_prompt_codex_payload_for_beat(p_codex_entry_ids uuid[], p_beat_id uuid) -> jsonb`
 
@@ -357,12 +390,12 @@ Diese Funktion macht aus bloßen IDs echten Inhalt.
 
 Sie sagt:
 
->   „Für diese Codex-Einträge und diesen Beat baue ich jetzt ein brauchbares Kontextpaket.“
+> „Für diese Codex-Einträge und diesen Beat baue ich jetzt ein brauchbares Kontextpaket.“
 
 ## Eingaben
 
 | Parameter           | Typ      |
-|---------------------|----------|
+| ------------------- | -------- |
 | `p_codex_entry_ids` | `uuid[]` |
 | `p_beat_id`         | `uuid`   |
 
@@ -390,7 +423,7 @@ Mit `unnest(...)` werden aus dem Array einzelne Zeilen.
 
 Sie ruft intern auf:
 
--   `get_matching_codex_details_for_beat(...)`
+- `get_matching_codex_details_for_beat(...)`
 
 ### Schritt 3: Details gruppieren
 
@@ -398,7 +431,7 @@ Alle passenden Detaileinträge eines Codex-Eintrags werden zu einer Liste zusamm
 
 ### Schritt 4: Haupteintrag immer behalten
 
-Auch wenn kein Detail passt, bleibt der Haupteintrag erhalten.  
+Auch wenn kein Detail passt, bleibt der Haupteintrag erhalten.\
 Dann ist `codex_details = []`.
 
 ## Stärke
@@ -409,7 +442,7 @@ Der Haupteintrag verschwindet nicht wegen eines Detailfilters.
 
 Die Qualität hängt stark von `get_matching_codex_details_for_beat(...)` ab.
 
-***
+---
 
 # 6.5 `get_matching_codex_details_for_beat(p_codex_entry_ids uuid[], p_beat_id uuid)`
 
@@ -419,19 +452,19 @@ Diese Funktion ist der eigentliche „Regelmeister“.
 
 Sie entscheidet:
 
->   „Welche Details eines Codex-Eintrags darf ich **jetzt**, in **diesem Beat**, wirklich zeigen?“
+> „Welche Details eines Codex-Eintrags darf ich **jetzt**, in **diesem Beat**, wirklich zeigen?“
 
 ## Eingaben
 
 | Parameter           | Typ      |
-|---------------------|----------|
+| ------------------- | -------- |
 | `p_codex_entry_ids` | `uuid[]` |
 | `p_beat_id`         | `uuid`   |
 
 ## Ausgabe
 
 | Feld                        | Bedeutung                       |
-|-----------------------------|---------------------------------|
+| --------------------------- | ------------------------------- |
 | `conditional_entry_id`      | ID des bedingten Detaileintrags |
 | `codex_entry_id`            | zugehöriger Haupteintrag        |
 | `title`                     | Titel des Details               |
@@ -449,10 +482,13 @@ Sie entscheidet:
 
 Sie holt:
 
--   Serie
--   POV-Charakter
--   Zeit
--   Beat-Text
+- Serie
+
+- POV-Charakter
+
+- Zeit
+
+- Beat-Text
 
 ### Schritt 2: Seed-Einträge bestimmen
 
@@ -464,7 +500,7 @@ Wenn ein Seed-Eintrag durch Exclusions gesperrt ist, fällt er raus.
 
 ### Schritt 4: Relation Tree bauen
 
-Hier werden Relationen **rekursiv** verfolgt.  
+Hier werden Relationen **rekursiv** verfolgt.\
 Das ist tiefer als in `get_matching_codex_ids_from_text(...)`.
 
 ### Schritt 5: Ausschlussbaum bauen
@@ -479,24 +515,29 @@ Sie ruft den Story-State des Beats ab.
 
 Nur solche bedingten Details werden betrachtet, die:
 
--   aktiv sind
--   zur Serie passen
--   im Zeitfenster passen
--   den POV-Bedingungen genügen
+- aktiv sind
+
+- zur Serie passen
+
+- im Zeitfenster passen
+
+- den POV-Bedingungen genügen
 
 ### Schritt 8: Bedingungen prüfen
 
 Jede Bedingung wird einzeln bewertet über:
 
--   `evaluate_story_variable_condition(...)`
+- `evaluate_story_variable_condition(...)`
 
 ### Schritt 9: Zusammenfassen
 
 Dann wird pro Detail entschieden:
 
--   keine Regel → gültig
--   `all` → alle Regeln müssen passen
--   `any` → mindestens eine Regel muss passen
+- keine Regel → gültig
+
+- `all` → alle Regeln müssen passen
+
+- `any` → mindestens eine Regel muss passen
 
 ## Stärke
 
@@ -504,11 +545,13 @@ Sehr mächtig und sehr fein steuerbar.
 
 ## Schwächen
 
--   komplex
--   schwerer zu debuggen
--   stark abhängig von sauber gepflegten Story-Variablen und Vergleichswerten
+- komplex
 
-***
+- schwerer zu debuggen
+
+- stark abhängig von sauber gepflegten Story-Variablen und Vergleichswerten
+
+---
 
 # 6.6 `evaluate_story_variable_condition(p_variable_type text, p_left_value jsonb, p_operator text, p_right_value jsonb) -> boolean`
 
@@ -518,12 +561,12 @@ Das ist die kleine Waage im System.
 
 Sie prüft:
 
->   „Ist diese einzelne Bedingung wahr oder falsch?“
+> „Ist diese einzelne Bedingung wahr oder falsch?“
 
 ## Eingaben
 
 | Parameter         | Typ     |
-|-------------------|---------|
+| ----------------- | ------- |
 | `p_variable_type` | `text`  |
 | `p_left_value`    | `jsonb` |
 | `p_operator`      | `text`  |
@@ -532,7 +575,7 @@ Sie prüft:
 ## Ausgabe
 
 | Typ       |
-|-----------|
+| --------- |
 | `boolean` |
 
 ## Wie sie arbeitet, ganz einfach erklärt
@@ -563,29 +606,35 @@ oder:
 
 Nur:
 
--   `=`
--   `<>`
--   `!=`
+- `=`
+
+- `<>`
+
+- `!=`
 
 #### Integer / Numeric
 
 Auch:
 
--   `<`
--   `<=`
--   `>`
--   `>=`
+- `<`
+
+- `<=`
+
+- `>`
+
+- `>=`
 
 #### Text / String / Enum
 
 Zusätzlich:
 
--   `like`
--   `not like`
+- `like`
+
+- `not like`
 
 ### Wichtiger Punkt
 
-`like` wird intern als **ILIKE** behandelt.  
+`like` wird intern als **ILIKE** behandelt.\
 Also groß-/kleinschreibungsunabhängig.
 
 ## Stärke
@@ -594,11 +643,13 @@ Sehr flexibel für mehrere Datentypen.
 
 ## Schwächen
 
--   unbekannte Typen oder Operatoren ergeben einfach `false`
--   Cast-Fehler wären ohne saubere Datenpflege problematisch
--   `like` ist absichtlich case-insensitive, was fachlich gewollt, aber nicht Standard-SQL-Verhalten ist
+- unbekannte Typen oder Operatoren ergeben einfach `false`
 
-***
+- Cast-Fehler wären ohne saubere Datenpflege problematisch
+
+- `like` ist absichtlich case-insensitive, was fachlich gewollt, aber nicht Standard-SQL-Verhalten ist
+
+---
 
 # 6.7 `render_codex_payload(p_payload jsonb, p_root_tag text) -> text`
 
@@ -608,9 +659,11 @@ Diese Funktion malt aus JSON einen Textblock.
 
 Sie macht aus:
 
--   Titel
--   Text
--   Details
+- Titel
+
+- Text
+
+- Details
 
 einen Block wie:
 
@@ -630,7 +683,7 @@ Sehr praktisch für direkte Promptverwendung.
 
 Bindet Datenbank und Promptformat enger zusammen.
 
-***
+---
 
 # 6.8 `build_full_codex_context_json(p_beat_id uuid, p_text text) -> jsonb`
 
@@ -643,7 +696,7 @@ Sie ersetzt die alte n8n-Orchestrierung fachlich in **einem einzigen Supabase-Ca
 ## Eingaben
 
 | Parameter   | Typ    | Bedeutung                                         |
-|-------------|--------|---------------------------------------------------|
+| ----------- | ------ | ------------------------------------------------- |
 | `p_beat_id` | `uuid` | Beat, aus dem Kapitel und Serie abgeleitet werden |
 | `p_text`    | `text` | Freitext für das Matching                         |
 
@@ -651,10 +704,13 @@ Sie ersetzt die alte n8n-Orchestrierung fachlich in **einem einzigen Supabase-Ca
 
 Ein JSONB-Objekt mit:
 
--   `input`
--   `ids`
--   `payloads`
--   `rendered`
+- `input`
+
+- `ids`
+
+- `payloads`
+
+- `rendered`
 
 ## Inhalte
 
@@ -662,17 +718,23 @@ Ein JSONB-Objekt mit:
 
 Eingabewerte und intern abgeleitete Werte:
 
--   `series_id`
--   `beat_id`
--   `chapter_id`
--   `text`
+- `series_id`
+
+- `beat_id`
+
+- `chapter_id`
+
+- `text`
 
 ### `ids`
 
--   `standard_codex_ids`
--   `super_codex_ids`
--   `chapter_codex_ids`
--   `world_codex_ids`
+- `standard_codex_ids`
+
+- `super_codex_ids`
+
+- `chapter_codex_ids`
+
+- `world_codex_ids`
 
 ### `payloads`
 
@@ -688,22 +750,25 @@ Die vier fertigen Promptblöcke
 
 Sie lädt aus dem Beat:
 
--   Szene
--   Kapitel
--   Novel
--   Serie
+- Szene
+
+- Kapitel
+
+- Novel
+
+- Serie
 
 ### Schritt 2: Standard-Basis bestimmen
 
 Über:
 
--   `get_matching_codex_ids_from_text(series_id, text)`
+- `get_matching_codex_ids_from_text(series_id, text)`
 
 ### Schritt 3: Super-Codex bestimmen
 
 Über:
 
--   `get_super_codex_ids(...)`
+- `get_super_codex_ids(...)`
 
 ### Schritt 4: Super-Codex mit Exclusions filtern
 
@@ -713,72 +778,92 @@ Auch Super-Codex-Ziele werden gegen `codex_exclusions` geprüft.
 
 Über:
 
--   `remove_super_codex_duplicates(...)`
+- `remove_super_codex_duplicates(...)`
 
 ### Schritt 6: Chapter-Codex bestimmen
 
 Aus:
 
--   `chapter_codex_entries`
--   nur aktive `codex_entries`
--   plus Exclusion-Prüfung
--   plus Dublettenbereinigung gegen Super-Codex
+- `chapter_codex_entries`
+
+- nur aktive `codex_entries`
+
+- plus Exclusion-Prüfung
+
+- plus Dublettenbereinigung gegen Super-Codex
 
 ### Schritt 7: World-Codex bestimmen
 
 Aus:
 
--   `codex_entries.always_include = true`
--   nur aktiv
--   plus Exclusion-Prüfung
--   plus Dublettenbereinigung gegen Super-Codex
+- `codex_entries.always_include = true`
+
+- nur aktiv
+
+- plus Exclusion-Prüfung
+
+- plus Dublettenbereinigung gegen Super-Codex
 
 ### Schritt 8: Payloads bauen
 
 Für jede der vier Mengen:
 
--   `get_prompt_codex_payload_for_beat(...)`
+- `get_prompt_codex_payload_for_beat(...)`
 
 ### Schritt 9: Alles rendern
 
 Mit:
 
--   `render_codex_payload(...)`
+- `render_codex_payload(...)`
 
 ## Stärke
 
--   nur noch **2 Eingabeparameter**
--   Serie und Kapitel werden sicher aus dem Beat abgeleitet
--   kein Widerspruch mehr zwischen `series_id` und `beat_id`
--   ein einziger Datenbankcall
--   robust bei leeren Arrays
--   Exclusions auch für Chapter- und World-Codex
--   deutlich weniger Overhead als in n8n
+- nur noch **2 Eingabeparameter**
+
+- Serie und Kapitel werden sicher aus dem Beat abgeleitet
+
+- kein Widerspruch mehr zwischen `series_id` und `beat_id`
+
+- ein einziger Datenbankcall
+
+- robust bei leeren Arrays
+
+- Exclusions auch für Chapter- und World-Codex
+
+- deutlich weniger Overhead als in n8n
 
 ## Schwächen
 
--   große Funktion mit viel Verantwortung
--   schwerer isoliert zu debuggen als viele kleine Schritte
--   Änderungen an einer Stelle können mehrere Ausgaben betreffen
+- große Funktion mit viel Verantwortung
 
-***
+- schwerer isoliert zu debuggen als viele kleine Schritte
+
+- Änderungen an einer Stelle können mehrere Ausgaben betreffen
+
+---
 
 ## 7. Der alte n8n-Workflow und warum SQL hier besser ist
 
 Dein alter Workflow hatte viele Einzelschritte:
 
--   Workflow-Trigger
--   Unterworkflow
--   Code-Nodes
--   Postgres-Nodes
--   Supabase-GETs
--   manuelle UUID-Array-Strings
--   getrenntes Rendering für Standard, Super, Chapter und World Codex
+- Workflow-Trigger
+
+- Unterworkflow
+
+- Code-Nodes
+
+- Postgres-Nodes
+
+- Supabase-GETs
+
+- manuelle UUID-Array-Strings
+
+- getrenntes Rendering für Standard, Super, Chapter und World Codex
 
 ### Vorteile der SQL-Gesamtfunktion gegenüber n8n
 
 | Thema           | n8n alt                           | Supabase neu                       |
-|-----------------|-----------------------------------|------------------------------------|
+| --------------- | --------------------------------- | ---------------------------------- |
 | Eingaben        | `series_id`, `beat_id`, `text`    | nur `beat_id`, `text`              |
 | Roundtrips      | viele                             | einer                              |
 | Leere Arrays    | problematisch                     | robust                             |
@@ -788,12 +873,12 @@ Dein alter Workflow hatte viele Einzelschritte:
 | Geschwindigkeit | eher langsam                      | meist deutlich schneller           |
 | Konsistenz      | `series_id` konnte unpassend sein | Serie wird direkt aus Beat gezogen |
 
-***
+---
 
 ## 8. Schwachstellen des Gesamtsystems
 
 | Schwachstelle             | Bedeutung                                           |
-|---------------------------|-----------------------------------------------------|
+| ------------------------- | --------------------------------------------------- |
 | Komplexität               | viele Schichten greifen ineinander                  |
 | Debugging                 | Fehlerursachen können in mehreren Ebenen liegen     |
 | 1-Hop-Basisrelationen     | Basis-Matching ist weniger tief als Detail-Matching |
@@ -801,64 +886,80 @@ Dein alter Workflow hatte viele Einzelschritte:
 | Prompt-Rendering in SQL   | praktisch, aber eng gekoppelt                       |
 | fehlende harte Testmatrix | bei vielen Regeln wird das schnell riskant          |
 
-***
+---
 
 ## 9. Was du jetzt **nicht** tun solltest
 
 Du hast es selbst schon richtig erkannt:
 
->   Die Komplexität muss jetzt eingehegt werden.
+> Die Komplexität muss jetzt eingehegt werden.
 
 Das bedeutet:
 
--   jetzt keine neuen großen Fachideen
--   keine POV-Filter auf Haupteintragsebene
--   keine neuen Super-Codex-Modi
--   keine rekursive Basismatching-Explosion
+- jetzt keine neuen großen Fachideen
+
+- keine POV-Filter auf Haupteintragsebene
+
+- keine neuen Super-Codex-Modi
+
+- keine rekursive Basismatching-Explosion
 
 Erst:
 
--   stabilisieren
--   testen
--   dokumentieren
--   dann weiterdrehen
+- stabilisieren
 
-***
+- testen
+
+- dokumentieren
+
+- dann weiterdrehen
+
+---
 
 ## 10. Was du jetzt sinnvoll verbessern könntest
 
 ### Kurzfristig
 
--   Funktionssignaturen aufräumen
--   eine kleine Testmatrix aufbauen
--   Debug-Ausgaben für Grenzfälle ergänzen
--   irreführende n8n-Node-Namen bereinigen
+- Funktionssignaturen aufräumen
+
+- eine kleine Testmatrix aufbauen
+
+- Debug-Ausgaben für Grenzfälle ergänzen
+
+- irreführende n8n-Node-Namen bereinigen
 
 ### Mittelfristig
 
--   Hilfsfunktion für Exclusion-Filter auf ID-Arrays
--   Wrapper-Funktion mit minimalem Output
--   fachlich definierte Reihenfolge der Promptbereiche
+- Hilfsfunktion für Exclusion-Filter auf ID-Arrays
+
+- Wrapper-Funktion mit minimalem Output
+
+- fachlich definierte Reihenfolge der Promptbereiche
 
 ### Langfristig
 
--   rekursive Basismatching-Variante optional
--   zusätzliche Super-Codex-Regelmodi
--   Debug-Funktion pro Codex-Entry und Beat
+- rekursive Basismatching-Variante optional
 
-***
+- zusätzliche Super-Codex-Regelmodi
+
+- Debug-Funktion pro Codex-Entry und Beat
+
+---
 
 ## 11. Fazit für ein Kind mit Schraubenzieher
 
 Wenn man das System ganz klein erklärt, dann macht es nur vier Dinge:
 
-1.  Es findet Karten, die im Text vorkommen.
-2.  Es legt noch Karten dazu, die mit diesen Karten zusammenhängen.
-3.  Es prüft, welche Geheiminfos auf den Karten **jetzt** gezeigt werden dürfen.
-4.  Es sortiert alles in hübsche Stapel für die KI.
+1. Es findet Karten, die im Text vorkommen.
+
+2. Es legt noch Karten dazu, die mit diesen Karten zusammenhängen.
+
+3. Es prüft, welche Geheiminfos auf den Karten **jetzt** gezeigt werden dürfen.
+
+4. Es sortiert alles in hübsche Stapel für die KI.
 
 Oder noch kürzer:
 
->   Es baut aus einem Text einen klugen Wissensrucksack für genau einen Moment der Geschichte.
+> Es baut aus einem Text einen klugen Wissensrucksack für genau einen Moment der Geschichte.
 
 Und genau deshalb ist das System stark: Es gibt der KI **nicht alles**, sondern nur das, was **jetzt** sinnvoll ist.

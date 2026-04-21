@@ -1,0 +1,373 @@
+---
+title: get_prompt_payload_context
+---
+# `public.get_prompt_payload_context(...)`
+
+## Zweck
+
+Diese Funktion ist die **zentrale Sammelfunktion für den Promptbau**.
+
+Sie fasst die Ergebnisse der zuvor definierten Kontextfunktionen in **einem einzigen Rückgabe-Record** zusammen, damit du in n8n oder in deinem Prompt-Script nicht mehrere RPC-Aufrufe koordinieren musst.
+
+Die Funktion liefert in einem Schritt:
+
+- die globalen Verlaufsdaten **vor dem aktuellen Kapitel**
+
+- den lokalen Kapitelkontext **rund um den aktuellen Beat**
+
+- die zugehörigen Truncation-Flags
+
+Sie ist dafür gedacht, direkt die Prompt-Platzhalter zu befüllen, insbesondere:
+
+- `<history_drafts>`
+
+- `<history_summaries>`
+
+- `<current_chapter_draft_before_beat>`
+
+- `<chapter_draft_after_beat>`
+
+- `<following_beat_texts>`
+
+Die Funktion selbst liefert **noch keine fertigen XML-/Tag-Blöcke**, sondern reine Nutzdatenfelder.\
+Die eigentlichen Prompt-Tags baust du danach im Prompt-Script oder in n8n darum herum.
+
+---
+
+## Parameter
+
+### `p_beat_id uuid`
+
+Die ID des Zielbeats, für den das Prompt-Payload gebaut werden soll.
+
+Die Funktion ist bewusst auf **Beat-Ebene** zugeschnitten, weil dein eigentlicher Schreib- und Patch-Kontext am Beat hängt.
+
+Aus dieser Beat-ID wird intern abgeleitet:
+
+- zu welchem Kapitel der Beat gehört
+
+- welche Kapitel davor als History relevant sind
+
+- welcher lokale Kapiteltext vor dem Beat liegt
+
+- welcher Draft-Text ab dem Beat folgt
+
+- welche späteren Beat-Texte nicht vorweggenommen werden dürfen
+
+---
+
+### `p_compile_series boolean default false`
+
+Steuert, ob die History nur innerhalb des aktuellen Romans oder auch romanübergreifend über die Serie hinweg aufgebaut wird.
+
+#### Verhalten:
+
+- `false`\
+  Nur frühere Kapitel des aktuellen Romans werden berücksichtigt.
+
+- `true`\
+  Wenn Mainflow-Vorgängerromane existieren, werden auch diese in die History einbezogen.
+
+#### Typischer Einsatz:
+
+- `false` bei kompakten Prompts oder wenn der Kontext bewusst lokal bleiben soll
+
+- `true` bei stark seriellen Romanen mit fortlaufender Kontinuität
+
+---
+
+### `p_required_only boolean default false`
+
+Steuert, ob bei Inflows nur solche berücksichtigt werden, die als `required` markiert sind.
+
+#### Verhalten:
+
+- `false`\
+  Alle relevanten Inflows werden berücksichtigt.
+
+- `true`\
+  Nur Inflows mit `chapter_inflows.is_required = true` werden berücksichtigt.
+
+#### Typischer Einsatz:
+
+- `false` für breiteren Story-Kontext
+
+- `true` wenn der Kontext streng fokussiert bleiben soll
+
+---
+
+### `p_history_draft_limit integer default 12000`
+
+Maximale Zeichenzahl für den aggregierten Block `history_drafts`.
+
+Wenn das Limit überschritten würde:
+
+- werden weitere Blöcke nicht mehr angehängt
+
+- `history_drafts_truncated = true`
+
+---
+
+### `p_history_summary_limit integer default 6000`
+
+Maximale Zeichenzahl für `history_summaries`.
+
+Wenn das Limit überschritten würde:
+
+- werden weitere Summary-Blöcke nicht mehr angehängt
+
+- `history_summaries_truncated = true`
+
+---
+
+### `p_draft_before_limit integer default 12000`
+
+Maximale Zeichenzahl für `current_chapter_draft_before_beat`.
+
+---
+
+### `p_draft_after_limit integer default 12000`
+
+Maximale Zeichenzahl für `chapter_draft_after_beat`.
+
+---
+
+### `p_following_beat_limit integer default 6000`
+
+Maximale Zeichenzahl für `following_beat_texts`.
+
+---
+
+## Rückgabewerte
+
+| Feld                                          | Typ       | Bedeutung                                                            |
+| --------------------------------------------- | --------- | -------------------------------------------------------------------- |
+| `history_drafts`                              | `text`    | Draft-Texte aller relevanten Kapitel vor dem aktuellen Kapitel       |
+| `history_summaries`                           | `text`    | Zusammenfassungen aller relevanten Kapitel vor dem aktuellen Kapitel |
+| `current_chapter_draft_before_beat`           | `text`    | Draft-Text im aktuellen Kapitel bis exklusiv vor dem Zielbeat        |
+| `chapter_draft_after_beat`                    | `text`    | Draft-Text im aktuellen Kapitel ab dem Zielbeat bis Kapitelende      |
+| `following_beat_texts`                        | `text`    | Beat-Texte nach dem Zielbeat bis Kapitelende                         |
+| `history_drafts_truncated`                    | `boolean` | `true`, wenn `history_drafts` wegen Limit nicht vollständig ist      |
+| `history_summaries_truncated`                 | `boolean` | `true`, wenn `history_summaries` wegen Limit nicht vollständig ist   |
+| `current_chapter_draft_before_beat_truncated` | `boolean` | `true`, wenn der Vorher-Kontext gekürzt wurde                        |
+| `chapter_draft_after_beat_truncated`          | `boolean` | `true`, wenn der Nachher-Draft gekürzt wurde                         |
+| `following_beat_texts_truncated`              | `boolean` | `true`, wenn die Folgebeat-Texte gekürzt wurden                      |
+
+---
+
+## Aufrufbeispiele
+
+### Variante A: Standardaufruf für normalen Schreibprompt
+
+```typescript
+select *
+from public.get_prompt_payload_context(
+  p_beat_id => '22222222-2222-2222-2222-222222222222'::uuid
+);
+```
+
+### Variante B: Romanübergreifende History mit allen Inflows
+
+```typescript
+select *
+from public.get_prompt_payload_context(
+  p_beat_id => '22222222-2222-2222-2222-222222222222'::uuid,
+  p_compile_series => true,
+  p_required_only => false
+);
+```
+
+### Variante C: Straffer Patch-Kontext mit kleineren Limits
+
+```typescript
+select *
+from public.get_prompt_payload_context(
+  p_beat_id => '22222222-2222-2222-2222-222222222222'::uuid,
+  p_compile_series => false,
+  p_required_only => true,
+  p_history_draft_limit => 8000,
+  p_history_summary_limit => 3000,
+  p_draft_before_limit => 6000,
+  p_draft_after_limit => 6000,
+  p_following_beat_limit => 2500
+);
+```
+
+---
+
+## Beispielhafte Rückgabe als Tabellenform
+
+```typescript
+history_drafts =
+"Kirk verließ die Wohnung ohne Frühstück. Nate wartete bereits auf dem Motorrad.
+
+Die Stadt lag noch halb im künstlichen Morgenlicht. Über den Dächern liefen Rekrutierungsanzeigen der Navy."
+
+history_summaries =
+"Kirk verschläft und gerät sofort unter Druck.
+Die Spannungen zwischen ihm und Nate werden sichtbar.
+Eine Inflow-Handlung etabliert politischen und militärischen Kontext."
+
+current_chapter_draft_before_beat =
+"Kirk blieb im Türrahmen stehen. Das Summen des Flurs lag ihm noch im Ohr.
+
+Nate deutete wortlos auf das Motorrad."
+
+chapter_draft_after_beat =
+"Der Regen setzte ein, noch bevor sie die Hauptstraße erreichten.
+
+Die ersten Projektionen des Schulcampus zeichneten sich bereits zwischen den Häusern ab."
+
+following_beat_texts =
+"Kirk bemerkt, dass Nate ungewöhnlich still ist.
+
+An der Schule wird eine Rekrutierung der Navy angekündigt.
+
+Kirk reagiert spöttisch, spürt aber unterschwellig Druck."
+
+history_drafts_truncated = false
+history_summaries_truncated = false
+current_chapter_draft_before_beat_truncated = false
+chapter_draft_after_beat_truncated = false
+following_beat_texts_truncated = false
+```
+
+---
+
+## Beispielhafte Rückgabe in JSON
+
+### Beispiel 1: Vollständige Rückgabe ohne Kürzung
+
+```typescript
+{
+  "history_drafts": "Kirk verließ die Wohnung ohne Frühstück. Nate wartete bereits auf dem Motorrad.\n\nDie Stadt lag noch halb im künstlichen Morgenlicht. Über den Dächern liefen Rekrutierungsanzeigen der Navy.",
+  "history_summaries": "Kirk verschläft und gerät sofort unter Druck.\nDie Spannungen zwischen ihm und Nate werden sichtbar.\nEine Inflow-Handlung etabliert politischen und militärischen Kontext.",
+  "current_chapter_draft_before_beat": "Kirk blieb im Türrahmen stehen. Das Summen des Flurs lag ihm noch im Ohr.\n\nNate deutete wortlos auf das Motorrad.",
+  "chapter_draft_after_beat": "Der Regen setzte ein, noch bevor sie die Hauptstraße erreichten.\n\nDie ersten Projektionen des Schulcampus zeichneten sich bereits zwischen den Häusern ab.",
+  "following_beat_texts": "Kirk bemerkt, dass Nate ungewöhnlich still ist.\n\nAn der Schule wird eine Rekrutierung der Navy angekündigt.\n\nKirk reagiert spöttisch, spürt aber unterschwellig Druck.",
+  "history_drafts_truncated": false,
+  "history_summaries_truncated": false,
+  "current_chapter_draft_before_beat_truncated": false,
+  "chapter_draft_after_beat_truncated": false,
+  "following_beat_texts_truncated": false
+}
+```
+
+### Beispiel 2: Rückgabe mit Limitüberschreitung
+
+```typescript
+{
+  "history_drafts": "Kirk verließ die Wohnung ohne Frühstück. Nate wartete bereits auf dem Motorrad.\n\nDie Stadt lag noch halb im künstlichen Morgenlicht.",
+  "history_summaries": "Kirk verschläft und gerät sofort unter Druck.\nDie Spannungen zwischen ihm und Nate werden sichtbar.",
+  "current_chapter_draft_before_beat": "Kirk blieb im Türrahmen stehen.",
+  "chapter_draft_after_beat": "Der Regen setzte ein, noch bevor sie die Hauptstraße erreichten.",
+  "following_beat_texts": "Kirk bemerkt, dass Nate ungewöhnlich still ist.",
+  "history_drafts_truncated": true,
+  "history_summaries_truncated": false,
+  "current_chapter_draft_before_beat_truncated": true,
+  "chapter_draft_after_beat_truncated": false,
+  "following_beat_texts_truncated": true
+}
+```
+
+---
+
+## SQL-Statement
+
+```typescript
+create or replace function public.get_prompt_payload_context(
+  p_beat_id uuid,
+  p_compile_series boolean default false,
+  p_required_only boolean default false,
+  p_history_draft_limit integer default 12000,
+  p_history_summary_limit integer default 6000,
+  p_draft_before_limit integer default 12000,
+  p_draft_after_limit integer default 12000,
+  p_following_beat_limit integer default 6000
+)
+returns table (
+  history_drafts text,
+  history_summaries text,
+  current_chapter_draft_before_beat text,
+  chapter_draft_after_beat text,
+  following_beat_texts text,
+  history_drafts_truncated boolean,
+  history_summaries_truncated boolean,
+  current_chapter_draft_before_beat_truncated boolean,
+  chapter_draft_after_beat_truncated boolean,
+  following_beat_texts_truncated boolean
+)
+language plpgsql
+stable
+as $$
+declare
+  v_history record;
+  v_chapter record;
+begin
+  select *
+  into v_history
+  from public.get_prompt_history_context(
+    p_beat_id => p_beat_id,
+    p_compile_series => p_compile_series,
+    p_required_only => p_required_only,
+    p_draft_limit => p_history_draft_limit,
+    p_summary_limit => p_history_summary_limit
+  );
+
+  select *
+  into v_chapter
+  from public.get_prompt_chapter_beat_context(
+    p_beat_id => p_beat_id,
+    p_draft_before_limit => p_draft_before_limit,
+    p_draft_after_limit => p_draft_after_limit,
+    p_following_beat_limit => p_following_beat_limit
+  );
+
+  return query
+  select
+    v_history.history_drafts,
+    v_history.history_summaries,
+    v_chapter.current_chapter_draft_before_beat,
+    v_chapter.chapter_draft_after_beat,
+    v_chapter.following_beat_texts,
+    v_history.history_drafts_truncated,
+    v_history.history_summaries_truncated,
+    v_chapter.current_chapter_draft_before_beat_truncated,
+    v_chapter.chapter_draft_after_beat_truncated,
+    v_chapter.following_beat_texts_truncated;
+end;
+$$;
+```
+
+# Hinweise zur Verwendung in n8n
+
+## Typische Verwendung
+
+Die Funktion ist ideal, wenn du in n8n nur **einen RPC-Knoten** für den Story-Kontext haben willst.
+
+Danach kannst du die Rückgabe direkt in Platzhalter mappen, z. B.:
+
+- `history_drafts`
+
+- `history_summaries`
+
+- `current_chapter_draft_before_beat`
+
+- `chapter_draft_after_beat`
+
+- `following_beat_texts`
+
+---
+
+## Beispielhafte Weiterverarbeitung in n8n
+
+Wenn dein RPC-Knoten ein einzelnes Objekt zurückgibt, kannst du später z. B. auf Felder so zugreifen:
+
+```typescript
+$('Get Prompt Payload').first().json.history_drafts
+$('Get Prompt Payload').first().json.history_summaries
+$('Get Prompt Payload').first().json.current_chapter_draft_before_beat
+$('Get Prompt Payload').first().json.chapter_draft_after_beat
+$('Get Prompt Payload').first().json.following_beat_texts
+```
+

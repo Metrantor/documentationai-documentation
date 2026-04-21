@@ -1,0 +1,503 @@
+---
+title: get_full_prompt_payload_with_codex
+---
+# `public.get_full_prompt_payload_with_codex(...)`
+
+## Zweck
+
+Diese Funktion ist die **zentrale Komfortfunktion für den vollständigen Prompt-Kontext**.
+
+Sie führt zwei bisher getrennte Systeme zusammen:
+
+### 1. Story-/Kapitel-/Beat-Kontext
+
+über:
+
+- `public.get_prompt_payload_context(...)`
+
+### 2. Codex-/Super-Codex-/Chapter-Codex-/World-Codex-Kontext
+
+über:
+
+- `public.build_full_codex_context_json(...)`
+
+Das Ziel ist, mit **einem einzigen Supabase-Call** das komplette Prompt-Payload für einen Beat zu erzeugen.
+
+Die Funktion selbst führt **keine neue Codexlogik** ein, sondern orchestriert bereits vorhandene Spezialfunktionen zu einem gemeinsamen Ergebnis.
+
+---
+
+## Was die Funktion fachlich liefert
+
+Sie liefert in einer Rückgabe:
+
+### A. `prompt_context`
+
+Der eigentliche Story-Kontext für das Schreiben:
+
+- `history_drafts`
+
+- `history_summaries`
+
+- `current_chapter_draft_before_beat`
+
+- `chapter_draft_after_beat`
+
+- `following_beat_texts`
+
+- dazu jeweils die Truncation-Flags
+
+---
+
+### B. `codex_context`
+
+Der vollständige Codex-Kontext aus dem bestehenden Codex-System:
+
+- `input`
+
+- `ids`
+
+- `payloads`
+
+- `rendered`
+
+Also genau das, was `build_full_codex_context_json(...)` bereits erzeugt.
+
+---
+
+### C. `prompt_blocks`
+
+Ein zusätzlicher Komfortbereich, der die für den Prompt direkt nutzbaren Blöcke bereits flach und bequem zugänglich macht.
+
+Darin stehen:
+
+- Story-Blöcke
+
+- gerenderte Codex-Blöcke
+
+Damit kannst du in n8n später einfacher zugreifen, ohne tief in verschachtelte JSON-Strukturen zu müssen.
+
+---
+
+## Eingabeparameter
+
+### `p_beat_id uuid`
+
+Die ID des Zielbeats, für den das Prompt-Payload erzeugt werden soll.
+
+Die Funktion ist bewusst **beat-zentriert**, weil:
+
+- der lokale Kapitelkontext relativ zu einem Beat bestimmt wird
+
+- der Codex-Kontext beatbezogene Detailfilter nutzt
+
+- der Story-State auf Beat-Ebene ausgewertet wird
+
+---
+
+### `p_text text`
+
+Expliziter Freitext für das Codex-Matching.
+
+Dieser Text wird **nicht intern zusammengesetzt**, sondern bewusst vom Aufrufer übergeben.
+
+Das ist fachlich sinnvoll, weil du selbst steuern kannst, worauf das Matching laufen soll, z. B. auf:
+
+- nur dem aktuellen Beat-Text
+
+- aktuellem Beat-Text + lokalen Kapitelkontext
+
+- Beat-Text + History + Zusammenfassungen
+
+- einem gezielt konstruierten Matching-Text
+
+Diese Entscheidung bleibt damit transparent und flexibel.
+
+---
+
+### `p_compile_series boolean default false`
+
+Steuert, ob der Story-History-Kontext nur innerhalb des aktuellen Romans oder auch romanübergreifend über die Serie aufgebaut wird.
+
+- `false`\
+  nur frühere Kapitel im aktuellen Roman
+
+- `true`\
+  auch frühere Mainflow-Kapitel in Vorgängerromanen
+
+---
+
+### `p_required_only boolean default false`
+
+Steuert, ob bei Inflows nur `required`-Inflows berücksichtigt werden.
+
+- `false`\
+  alle relevanten Inflows
+
+- `true`\
+  nur `chapter_inflows.is_required = true`
+
+---
+
+### `p_history_draft_limit integer default 12000`
+
+Maximale Länge des Blocks `history_drafts`.
+
+---
+
+### `p_history_summary_limit integer default 6000`
+
+Maximale Länge des Blocks `history_summaries`.
+
+---
+
+### `p_draft_before_limit integer default 12000`
+
+Maximale Länge des Blocks `current_chapter_draft_before_beat`.
+
+---
+
+### `p_draft_after_limit integer default 12000`
+
+Maximale Länge des Blocks `chapter_draft_after_beat`.
+
+---
+
+### `p_following_beat_limit integer default 6000`
+
+Maximale Länge des Blocks `following_beat_texts`.
+
+---
+
+## Rückgabewert
+
+Die Funktion gibt ein einzelnes `jsonb`-Objekt zurück.
+
+Die oberste Struktur lautet:
+
+```typescript
+{
+  "prompt_context": { ... },
+  "codex_context": { ... },
+  "prompt_blocks": { ... }
+}
+```
+
+---
+
+## Bedeutung der Rückgabebereiche
+
+### `prompt_context`
+
+Technisch strukturierter Story-Kontext aus `get_prompt_payload_context(...)`
+
+### `codex_context`
+
+Vollständiger technischer Codex-Kontext aus `build_full_codex_context_json(...)`
+
+### `prompt_blocks`
+
+Direkt prompttaugliche Blöcke für n8n / Prompt-Script
+
+Empfohlene Felder:
+
+- `history_drafts`&#x20;
+
+- `history_summaries`&#x20;
+
+- `current_chapter_draft_before_beat`&#x20;
+
+- `chapter_draft_after_beat`&#x20;
+
+- `following_beat_texts`&#x20;
+
+- `codex`&#x20;
+
+- `super_codex`&#x20;
+
+- `chapter_codex`&#x20;
+
+- `world_codex`&#x20;
+
+---
+
+# Aufrufbeispiele
+
+## Variante A: Standardaufruf
+
+```typescript
+select public.get_full_prompt_payload_with_codex(
+  p_beat_id => '22222222-2222-2222-2222-222222222222'::uuid,
+  p_text => 'Kirk spricht mit Nate über das Artefakt und Hurstons Einfluss auf die Akademie.'
+);
+```
+
+---
+
+## Variante B: Romanübergreifende History, alle Inflows
+
+```typescript
+select public.get_full_prompt_payload_with_codex(
+  p_beat_id => '22222222-2222-2222-2222-222222222222'::uuid,
+  p_text => 'Kirk spricht mit Nate über das Artefakt und Hurstons Einfluss auf die Akademie.',
+  p_compile_series => true,
+  p_required_only => false
+);
+```
+
+---
+
+## Variante C: Straffer Patch-Kontext
+
+```typescript
+select public.get_full_prompt_payload_with_codex(
+  p_beat_id => '22222222-2222-2222-2222-222222222222'::uuid,
+  p_text => 'Kirk bemerkt, dass Nate ungewöhnlich still ist. Das Artefakt bleibt unausgesprochen präsent.',
+  p_compile_series => false,
+  p_required_only => true,
+  p_history_draft_limit => 8000,
+  p_history_summary_limit => 3000,
+  p_draft_before_limit => 5000,
+  p_draft_after_limit => 5000,
+  p_following_beat_limit => 2500
+);
+```
+
+---
+
+# Beispielhafte Rückgabe in JSON
+
+## Beispiel 1: vollständige Rückgabe
+
+```typescript
+{
+  "prompt_context": {
+    "history_drafts": "Kirk verließ die Wohnung ohne Frühstück. Nate wartete bereits auf dem Motorrad.\n\nDie Stadt lag noch halb im künstlichen Morgenlicht.",
+    "history_summaries": "Kirk verschläft und gerät sofort unter Druck.\nDie Spannungen zwischen ihm und Nate werden sichtbar.",
+    "current_chapter_draft_before_beat": "Kirk blieb im Türrahmen stehen. Das Summen des Flurs lag ihm noch im Ohr.",
+    "chapter_draft_after_beat": "Der Regen setzte ein, noch bevor sie die Hauptstraße erreichten.",
+    "following_beat_texts": "Kirk bemerkt, dass Nate ungewöhnlich still ist.\n\nAn der Schule wird die Rekrutierung der Navy angekündigt.",
+    "history_drafts_truncated": false,
+    "history_summaries_truncated": false,
+    "current_chapter_draft_before_beat_truncated": false,
+    "chapter_draft_after_beat_truncated": false,
+    "following_beat_texts_truncated": false
+  },
+  "codex_context": {
+    "input": {
+      "beat_id": "22222222-2222-2222-2222-222222222222",
+      "chapter_id": "cccccccc-cccc-cccc-cccc-cccccccccccc",
+      "series_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      "text": "Kirk spricht mit Nate über das Artefakt und Hurstons Einfluss auf die Akademie."
+    },
+    "ids": {
+      "standard_codex_ids": [
+        "11111111-1111-1111-1111-111111111111",
+        "22222222-2222-2222-2222-222222222222"
+      ],
+      "super_codex_ids": [
+        "99999999-9999-9999-9999-999999999999"
+      ],
+      "chapter_codex_ids": [
+        "33333333-3333-3333-3333-333333333333"
+      ],
+      "world_codex_ids": [
+        "44444444-4444-4444-4444-444444444444"
+      ]
+    },
+    "payloads": {
+      "codex": {
+        "items": [
+          {
+            "codex_title": "Kirk Washington",
+            "codex_text": "Kirk Washington ist ein junger Mann mit technischem Talent und innerer Zerrissenheit.",
+            "codex_details": [
+              "Er gibt sich zu Beginn seiner Navy-Laufbahn als sein verstorbener Bruder Nate aus."
+            ]
+          }
+        ]
+      },
+      "super_codex": {
+        "items": [
+          {
+            "title": "Politische Brisanz des Artefakt-Komplexes",
+            "text": "Kirk, Artefakt und Hurston bilden zusammen einen hochsensiblen Konfliktkomplex."
+          }
+        ]
+      }
+    },
+    "rendered": {
+      "codex": "<codex>...</codex>",
+      "super_codex": "<super codex>...</super codex>",
+      "chapter_codex": "<chapter codex>...</chapter codex>",
+      "world_codex": "<world codex>...</world codex>"
+    }
+  },
+  "prompt_blocks": {
+    "history_drafts": "Kirk verließ die Wohnung ohne Frühstück. Nate wartete bereits auf dem Motorrad.\n\nDie Stadt lag noch halb im künstlichen Morgenlicht.",
+    "history_summaries": "Kirk verschläft und gerät sofort unter Druck.\nDie Spannungen zwischen ihm und Nate werden sichtbar.",
+    "current_chapter_draft_before_beat": "Kirk blieb im Türrahmen stehen. Das Summen des Flurs lag ihm noch im Ohr.",
+    "chapter_draft_after_beat": "Der Regen setzte ein, noch bevor sie die Hauptstraße erreichten.",
+    "following_beat_texts": "Kirk bemerkt, dass Nate ungewöhnlich still ist.\n\nAn der Schule wird die Rekrutierung der Navy angekündigt.",
+    "codex": "<codex>...</codex>",
+    "super_codex": "<super codex>...</super codex>",
+    "chapter_codex": "<chapter codex>...</chapter codex>",
+    "world_codex": "<world codex>...</world codex>"
+  }
+}
+```
+
+---
+
+## Beispiel 2: knappe Rückgabe mit Kürzungen
+
+```typescript
+{
+  "prompt_context": {
+    "history_drafts": "Kirk verließ die Wohnung ohne Frühstück.",
+    "history_summaries": "Kirk verschläft und gerät unter Druck.",
+    "current_chapter_draft_before_beat": "Kirk blieb im Türrahmen stehen.",
+    "chapter_draft_after_beat": "Der Regen setzte ein.",
+    "following_beat_texts": "Kirk bemerkt Nates Schweigen.",
+    "history_drafts_truncated": true,
+    "history_summaries_truncated": false,
+    "current_chapter_draft_before_beat_truncated": true,
+    "chapter_draft_after_beat_truncated": false,
+    "following_beat_texts_truncated": true
+  },
+  "codex_context": {
+    "input": {
+      "beat_id": "22222222-2222-2222-2222-222222222222",
+      "chapter_id": "cccccccc-cccc-cccc-cccc-cccccccccccc",
+      "series_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      "text": "Kirk und das Artefakt."
+    },
+    "ids": {
+      "standard_codex_ids": [
+        "11111111-1111-1111-1111-111111111111"
+      ],
+      "super_codex_ids": [],
+      "chapter_codex_ids": [],
+      "world_codex_ids": [
+        "44444444-4444-4444-4444-444444444444"
+      ]
+    },
+    "payloads": {},
+    "rendered": {
+      "codex": "<codex>...</codex>",
+      "super_codex": "",
+      "chapter_codex": "",
+      "world_codex": "<world codex>...</world codex>"
+    }
+  },
+  "prompt_blocks": {
+    "history_drafts": "Kirk verließ die Wohnung ohne Frühstück.",
+    "history_summaries": "Kirk verschläft und gerät unter Druck.",
+    "current_chapter_draft_before_beat": "Kirk blieb im Türrahmen stehen.",
+    "chapter_draft_after_beat": "Der Regen setzte ein.",
+    "following_beat_texts": "Kirk bemerkt Nates Schweigen.",
+    "codex": "<codex>...</codex>",
+    "super_codex": "",
+    "chapter_codex": "",
+    "world_codex": "<world codex>...</world codex>"
+  }
+}
+```
+
+---
+
+# SQL-Statement
+
+## Annahmen
+
+Dieses Statement geht davon aus, dass bereits vorhanden sind:
+
+- `public.get_prompt_payload_context(...)`
+
+- `public.build_full_codex_context_json(...)`
+
+Außerdem gehe ich davon aus, dass `build_full_codex_context_json(...)` in `rendered` die Schlüssel liefert:
+
+- `codex`
+
+- `super_codex`
+
+- `chapter_codex`
+
+- `world_codex`
+
+Falls dort in deiner echten Implementierung leicht andere Schlüsselnamen stehen, musst du nur diese JSON-Pfade unten anpassen.
+
+```typescript
+create or replace function public.get_full_prompt_payload_with_codex(
+  p_beat_id uuid,
+  p_text text,
+  p_compile_series boolean default false,
+  p_required_only boolean default false,
+  p_history_draft_limit integer default 12000,
+  p_history_summary_limit integer default 6000,
+  p_draft_before_limit integer default 12000,
+  p_draft_after_limit integer default 12000,
+  p_following_beat_limit integer default 6000
+)
+returns jsonb
+language plpgsql
+stable
+as $$
+declare
+  v_prompt_context record;
+  v_codex_context jsonb;
+begin
+  select *
+  into v_prompt_context
+  from public.get_prompt_payload_context(
+    p_beat_id => p_beat_id,
+    p_compile_series => p_compile_series,
+    p_required_only => p_required_only,
+    p_history_draft_limit => p_history_draft_limit,
+    p_history_summary_limit => p_history_summary_limit,
+    p_draft_before_limit => p_draft_before_limit,
+    p_draft_after_limit => p_draft_after_limit,
+    p_following_beat_limit => p_following_beat_limit
+  );
+
+  v_codex_context := public.build_full_codex_context_json(
+    p_beat_id => p_beat_id,
+    p_text => p_text
+  );
+
+  return jsonb_build_object(
+    'prompt_context',
+    jsonb_build_object(
+      'history_drafts', v_prompt_context.history_drafts,
+      'history_summaries', v_prompt_context.history_summaries,
+      'current_chapter_draft_before_beat', v_prompt_context.current_chapter_draft_before_beat,
+      'chapter_draft_after_beat', v_prompt_context.chapter_draft_after_beat,
+      'following_beat_texts', v_prompt_context.following_beat_texts,
+      'history_drafts_truncated', v_prompt_context.history_drafts_truncated,
+      'history_summaries_truncated', v_prompt_context.history_summaries_truncated,
+      'current_chapter_draft_before_beat_truncated', v_prompt_context.current_chapter_draft_before_beat_truncated,
+      'chapter_draft_after_beat_truncated', v_prompt_context.chapter_draft_after_beat_truncated,
+      'following_beat_texts_truncated', v_prompt_context.following_beat_texts_truncated
+    ),
+
+    'codex_context',
+    coalesce(v_codex_context, '{}'::jsonb),
+
+    'prompt_blocks',
+    jsonb_build_object(
+      'history_drafts', v_prompt_context.history_drafts,
+      'history_summaries', v_prompt_context.history_summaries,
+      'current_chapter_draft_before_beat', v_prompt_context.current_chapter_draft_before_beat,
+      'chapter_draft_after_beat', v_prompt_context.chapter_draft_after_beat,
+      'following_beat_texts', v_prompt_context.following_beat_texts,
+      'codex', coalesce(v_codex_context -> 'rendered' ->> 'codex', ''),
+      'super_codex', coalesce(v_codex_context -> 'rendered' ->> 'super_codex', ''),
+      'chapter_codex', coalesce(v_codex_context -> 'rendered' ->> 'chapter_codex', ''),
+      'world_codex', coalesce(v_codex_context -> 'rendered' ->> 'world_codex', '')
+    )
+  );
+end;
+$$;
+```
+

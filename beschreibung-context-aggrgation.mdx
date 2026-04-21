@@ -1,0 +1,789 @@
+---
+title: Beschreibung
+---
+**Fachkonzept zur Sammlung der Codex-Einträge für Prompting** — so, wie es aus unserem bisherigen Stand sinnvoll und konsistent hervorgeht.
+
+Ich trenne dabei sauber zwischen:
+
+1. **Ziel des Konzepts**
+
+2. **fachliche Bausteine**
+
+3. **technische Architektur**
+
+4. **Aufrufkette / wer ruft wen auf**
+
+5. **Eingaben und Ausgaben**
+
+6. **JSON-Beispiele**
+
+7. **empfohlene Zielstruktur für dein System**
+
+Wichtig vorweg:\
+Beim **normalen Codex** ist das Bild ziemlich klar.\
+Beim **Super-Codex** ist das fachliche Konzept ebenfalls klar, aber ich bin beim exakten final implementierten Funktionsnamen aus dem alten Stand nicht vollständig sicher. Deshalb beschreibe ich dort die Architektur fachlich sauber und markiere die technisch unsicheren Stellen ehrlich.
+
+---
+
+# 1) Ziel des Konzepts
+
+Das Ziel der Codex-Sammlung ist:
+
+> Für einen konkreten Schreibkontext — typischerweise einen Beat — die **relevanten Wissensbausteine** aus dem Codex zu sammeln, zu filtern, zu priorisieren und in eine Form zu bringen, die sich direkt für den Prompt eignet.
+
+Der Codex soll dabei nicht einfach „alles Mögliche“ liefern, sondern nur das, was für den aktuellen Schreibkontext wirklich relevant ist.
+
+Die Sammlung muss daher mehrere Aufgaben gleichzeitig erfüllen:
+
+- relevante Einträge **finden**
+
+- irrelevante Einträge **ausschließen**
+
+- abhängige Einträge über **Relationen nachziehen**
+
+- kontextabhängige Details **aktivieren oder ausblenden**
+
+- konflikthafte oder unerwünschte Inhalte **unterdrücken**
+
+- daraus einen Prompt-Block bauen, der für das Modell gut nutzbar ist
+
+---
+
+# 2) Fachliche Grundidee
+
+Die Sammlung der Codex-Einträge besteht im Kern aus **zwei Stufen**:
+
+## Stufe A: Relevante Codex-Einträge identifizieren
+
+Hier wird ermittelt:
+
+- welche Codex-Einträge durch den aktuellen Text / Beat / Kontext erwähnt oder ausgelöst werden
+
+- welche Einträge manuell hinzugefügt wurden
+
+- welche Einträge global oder per Relation zusätzlich relevant werden
+
+Ergebnis:
+
+- eine Liste von `codex_entry_ids`
+
+---
+
+## Stufe B: Relevante Codex-Einträge für Prompting aufbereiten
+
+Hier wird aus den ermittelten IDs ein Prompt-tauglicher Payload gebaut:
+
+- Basisbeschreibung des Codex-Eintrags
+
+- aktivierte Detailtexte
+
+- relationale Kontexte
+
+- Ausschlusslogik
+
+- Zeitlogik
+
+- POV-Logik
+
+- Variablenlogik
+
+Ergebnis:
+
+- strukturierte Nutzdaten für `<codex>`
+
+---
+
+# 3) Fachliche Bausteine des Codex-Systems
+
+## 3.1 Direkte Erkennung durch Text
+
+Ein Codex-Eintrag wird relevant, wenn sein Name oder ein Alias im relevanten Text vorkommt.
+
+Beispiele:
+
+- „Kirk“
+
+- „Atlas Frontiers“
+
+- „Hurston“
+
+- Alias-Schreibweisen
+
+- gegebenenfalls case-sensitive oder case-insensitive
+
+Diese Erkennung ist die wichtigste Basisschicht.
+
+---
+
+## 3.2 Manuelle Zuweisungen
+
+Zusätzlich zu automatisch erkannten Einträgen können Einträge bewusst mitgegeben werden, etwa weil:
+
+- sie für die Szene wichtig sind, auch wenn sie nicht direkt genannt werden
+
+- sie implizit bekannt sein müssen
+
+- sie aus UI-Auswahl oder Kapitelbindung stammen
+
+Diese Schicht ist wichtig, weil Text-Matching nie alles perfekt findet.
+
+---
+
+## 3.3 Globale Einträge
+
+Bestimmte Einträge können immer oder fast immer relevant sein, etwa:
+
+- Grundregeln der Welt
+
+- konstante Erzähllogik
+
+- global wichtige Fraktionen
+
+- wichtige Technikregeln
+
+Das entspricht z. B. Feldern wie:
+
+- `always_include`
+
+- oder ähnlicher globaler Einbindungslogik
+
+---
+
+## 3.4 Relationen zwischen Einträgen
+
+Einträge können weitere Einträge nachziehen.
+
+Beispiel:
+
+- „Kirk“ zieht „Nate“ nicht automatisch, aber evtl. „Familie Washington“
+
+- „Atlas Frontiers“ zieht „Stationen“, „Ränge“, „Versorgungslogik“
+
+- „Admiral Thorn“ zieht evtl. einen ideologischen Kontext
+
+Diese Beziehung läuft typischerweise über:
+
+- `codex_relations`
+
+- ggf. mit einem Modus wie `pull_into_context`
+
+---
+
+## 3.5 Ausschlusslogik
+
+Ein Eintrag soll manchmal **nicht** in den Prompt, obwohl sein Name vorkommt.
+
+Beispiel:
+
+- gleiche Bezeichnung mit anderer Bedeutung
+
+- Wort tritt in einem Kontext auf, der absichtlich kein Codex-Match sein soll
+
+- eine Phrase signalisiert, dass dieser Eintrag in diesem Text nicht gemeint ist
+
+Dafür gibt es:
+
+- `codex_exclusions`
+
+- ggf. normalisierte Ausschlussphrasen
+
+---
+
+## 3.6 Bedingte Details
+
+Ein Codex-Eintrag kann Grundwissen haben und zusätzlich kontextabhängige Detailtexte.
+
+Diese Details sollen nur eingeblendet werden, wenn Bedingungen erfüllt sind, z. B.:
+
+- Zeitfenster
+
+- POV-Figur
+
+- Story-Variablen
+
+- Modus `all` / `any`
+
+Das ist wichtig, damit der Codex nicht statisch und plump wird.
+
+---
+
+## 3.7 Super-Codex
+
+Der Super-Codex ist eine zweite Ebene:
+
+> Bestimmte Spezialkontexte werden nur dann eingeblendet, wenn **mehrere andere Codex-Einträge gemeinsam** relevant sind.
+
+Also nicht:
+
+- Ein Eintrag löst sich selbst aus
+
+sondern:
+
+- eine Kombination mehrerer Einträge aktiviert einen zusätzlichen Kontextblock
+
+Beispiel:
+
+- „Kirk“ + „Artefakt“ + „Hurston“\
+  ⇒ spezieller Super-Codex-Eintrag zur politischen Brisanz
+
+Das ist im Kern eine **Co-Trigger-Logik**.
+
+---
+
+# 4) Empfohlene technische Architektur
+
+Ich beschreibe dir jetzt das Zielbild als Aufrufarchitektur.
+
+## Architekturdiagramm
+
+```typescript
+[Prompt / n8n / RPC-Caller]
+            |
+            v
+[Text- und Kontextsammlung]
+            |
+            v
+[get_matching_codex_ids_from_text(...)]
+            |
+            +----------------------------+
+            |                            |
+            v                            v
+[manuell gesetzte Codex-IDs]      [globale / always_include IDs]
+            |                            |
+            +-------------+--------------+
+                          |
+                          v
+                [ID-Menge normalisieren]
+                          |
+                          v
+               [Relationen nachziehen]
+                          |
+                          v
+          [Ausschlüsse / ai_context_mode filtern]
+                          |
+                          v
+         [get_prompt_codex_payload_for_beat(...)]
+                          |
+                          +-----------------------------+
+                          |                             |
+                          v                             v
+          [Conditional Details aktivieren]   [Exclusions final beachten]
+                          |
+                          v
+                  [CODEx Prompt Payload]
+                          |
+                          +-----------------------------+
+                          |
+                          v
+                [Super-Codex Trigger prüfen]
+                          |
+                          v
+         [Super-Codex Payload ermitteln/aufbauen]
+                          |
+                          v
+        [Finales Prompt-Payload: codex + super_codex]
+
+```
+
+---
+
+# 5) Wer ruft wen auf
+
+Hier die gleiche Logik als konkrete Aufrufkette.
+
+## 5.1 Normaler Codex
+
+### Schritt 1: Textbasis bestimmen
+
+Der Aufrufer sammelt zuerst den Text, aus dem Codex-Relevanz erkannt werden soll.
+
+Typische Quellen:
+
+- aktueller Beat-Text
+
+- bisheriger Kapiteltext
+
+- Kapitelzusammenfassungen
+
+- manuell zugewiesene Einträge
+
+- evtl. Kapitel-/Szenen-Links
+
+Das ist noch kein Codex-Aufruf, sondern Vorarbeit.
+
+---
+
+### Schritt 2: Matching
+
+Dann wird aus dem Text eine Menge relevanter Einträge erkannt.
+
+Wahrscheinlich relevante Funktion:
+
+- `get_matching_codex_ids_from_text(...)`
+
+Diese Funktion sucht nach:
+
+- Namen
+
+- Aliasen
+
+- Wortgrenzen
+
+- Case-Sensitivity
+
+- `track_mentions`
+
+- `ai_context_mode`
+
+Ergebnis:
+
+- `uuid[]` mit passenden Codex-Einträgen
+
+---
+
+### Schritt 3: Ergänzen
+
+Danach werden weitere IDs ergänzt:
+
+- manuell gesetzte Codex-IDs
+
+- global einzubindende IDs
+
+- evtl. relationsbedingte IDs
+
+Diese Logik kann je nach Zuschnitt:
+
+- im Caller
+
+- oder in einer DB-Funktion stattfinden
+
+---
+
+### Schritt 4: Payload aufbauen
+
+Dann wird aus den IDs und dem Beat der eigentliche Prompt-Payload gebaut.
+
+Wahrscheinlich relevante Funktion:
+
+- `get_prompt_codex_payload_for_beat(p_codex_entry_ids uuid[], p_beat_id uuid)`
+
+Diese Funktion baut pro Eintrag:
+
+- Titel
+
+- Grundtext
+
+- Detailtexte
+
+- relationale Ergänzungen
+
+- Kontextfilter
+
+Ergebnis:
+
+- strukturierte Liste oder JSON-artiges Payload
+
+---
+
+## 5.2 Super-Codex
+
+Hier ist die Logik anders.
+
+### Schritt 1: Ausgangsbasis
+
+Der Super-Codex arbeitet nicht primär direkt auf Text, sondern auf der bereits gefundenen Menge an normalen Codex-Einträgen.
+
+Also:
+
+- erst normaler Codex
+
+- dann Super-Codex
+
+---
+
+### Schritt 2: Triggerkombinationen prüfen
+
+Dann wird geprüft:
+
+- welche Super-Codex-Regeln existieren
+
+- welche davon ausgelöst werden
+
+- ob alle nötigen Trigger-Einträge vorhanden sind
+
+Vermutlich über Tabellen wie:
+
+- `codex_super_rules`
+
+- `codex_super_rule_triggers`
+
+- oder ähnliche Struktur
+
+---
+
+### Schritt 3: Super-Codex-Payload bauen
+
+Wenn eine Regel greift, wird daraus ein eigener Block gebaut:
+
+- Titel
+
+- Text
+
+- ggf. Priorität
+
+- evtl. Zusatzbedingungen
+
+Ergebnis:
+
+- separater Payload für `<super_codex>`
+
+---
+
+# 6) Eingabeparameter und Ergebnisse der Kernbausteine
+
+Ich stelle das jetzt als konzeptionelle Schnittstellenübersicht dar.
+
+---
+
+## 6.1 `get_matching_codex_ids_from_text(...)`
+
+## Zweck
+
+Ermittelt passende Codex-Einträge aus freiem Text.
+
+## Typische Eingaben
+
+- `p_series_id`
+
+- `p_text`
+
+Optional je nach Version evtl.:
+
+- Modusparameter
+
+- Ausschluss-/Normalisierungslogik
+
+- Scope
+
+## Typische Logik
+
+- Namen/Aliase finden
+
+- `track_mentions` beachten
+
+- `ai_context_mode != 'never_include'`
+
+- `is_active = true`
+
+- Ausschlüsse beachten
+
+- Dubletten vermeiden
+
+## Ergebnis
+
+- Array von `uuid`
+
+- also eine Menge passender Codex-Entry-IDs
+
+---
+
+## 6.2 `get_prompt_codex_payload_for_beat(...)`
+
+## Zweck
+
+Baut aus einer Menge von Codex-IDs und einem Zielbeat den Prompt-Payload.
+
+## Typische Eingaben
+
+- `p_codex_entry_ids uuid[]`
+
+- `p_beat_id uuid`
+
+## Typische Logik
+
+- Basistexte ziehen
+
+- relationale Zusatzkontexte
+
+- Detailtexte anhand von Bedingungen aktivieren
+
+- Exclusions beachten
+
+- Zeit / POV / Variablenlogik auswerten
+
+## Ergebnis
+
+Ein strukturierter Payload pro Codex-Eintrag, z. B. mit:
+
+- `codex_entry_id`
+
+- `codex_title`
+
+- `codex_text`
+
+- `codex_details`
+
+---
+
+## 6.3 Super-Codex-Prüfung
+
+## Zweck
+
+Ermittelt, ob aus der Kombination gefundener Codex-Einträge zusätzlicher Spezialkontext entsteht.
+
+## Eingaben
+
+- Menge der bereits gefundenen Codex-IDs
+
+- evtl. `p_beat_id`
+
+- evtl. `series_id`
+
+## Ergebnis
+
+- Liste relevanter Super-Codex-Einträge
+
+- oder direkt aufbereiteter Super-Codex-Text
+
+---
+
+# 7) Empfohlenes Zielmodell für dein System
+
+Ich würde die Sammlung technisch so staffeln:
+
+## Ebene 1: Erkennung
+
+- Text einsammeln
+
+- IDs matchen
+
+## Ebene 2: Normalisieren
+
+- manuelle IDs ergänzen
+
+- globale IDs ergänzen
+
+- Relations-IDs ergänzen
+
+- Deduplizieren
+
+## Ebene 3: Payload-Bau
+
+- Codex-Payload bauen
+
+## Ebene 4: Super-Codex
+
+- Triggerkombinationen prüfen
+
+- Super-Codex-Payload bauen
+
+## Ebene 5: Prompt-Befüllung
+
+- `<codex>`
+
+- `<super_codex>`
+
+---
+
+# 8) JSON-Beispiele
+
+## 8.1 Beispiel: reines Matching-Ergebnis
+
+```typescript
+{
+  "series_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+  "source_text": "Kirk spricht mit Nate über das Artefakt und über Hurstons Rolle in der Akademie.",
+  "matched_codex_entry_ids": [
+    "11111111-1111-1111-1111-111111111111",
+    "22222222-2222-2222-2222-222222222222",
+    "33333333-3333-3333-3333-333333333333",
+    "44444444-4444-4444-4444-444444444444"
+  ]
+}
+
+```
+
+Hier könnten die IDs z. B. stehen für:
+
+- Kirk
+
+- Nate
+
+- Artefakt
+
+- Hurston
+
+---
+
+## 8.2 Beispiel: normalisiertes Codex-ID-Paket
+
+```typescript
+{
+  "matched_codex_entry_ids": [
+    "11111111-1111-1111-1111-111111111111",
+    "22222222-2222-2222-2222-222222222222"
+  ],
+  "manual_codex_entry_ids": [
+    "55555555-5555-5555-5555-555555555555"
+  ],
+  "always_include_codex_entry_ids": [
+    "66666666-6666-6666-6666-666666666666"
+  ],
+  "relation_added_codex_entry_ids": [
+    "77777777-7777-7777-7777-777777777777"
+  ],
+  "final_codex_entry_ids": [
+    "11111111-1111-1111-1111-111111111111",
+    "22222222-2222-2222-2222-222222222222",
+    "55555555-5555-5555-5555-555555555555",
+    "66666666-6666-6666-6666-666666666666",
+    "77777777-7777-7777-7777-777777777777"
+  ]
+}
+
+```
+
+---
+
+## 8.3 Beispiel: Prompt-Codex-Payload
+
+```typescript
+{
+  "items": [
+    {
+      "codex_entry_id": "11111111-1111-1111-1111-111111111111",
+      "codex_title": "Kirk Washington",
+      "codex_text": "Kirk Washington ist ein junger Mann mit starkem technischen Talent, innerer Unsicherheit und wachsendem strategischem Denken.",
+      "codex_details": [
+        "Er gibt sich zu Beginn seiner Navy-Laufbahn als sein verstorbener Bruder Nate aus.",
+        "Er ist biologisch mit dem Artefakt verbunden, ohne dass dies öffentlich bekannt ist."
+      ]
+    },
+    {
+      "codex_entry_id": "33333333-3333-3333-3333-333333333333",
+      "codex_title": "Das Artefakt",
+      "codex_text": "Das Artefakt ist ein außerirdisches Objekt, das biologisch an Kirk gebunden wurde und als Leuchtfeuer für Aliens dienen kann.",
+      "codex_details": [
+        "Mehrere Kräfte innerhalb und außerhalb der UEE wollen das Artefakt kontrollieren.",
+        "Das Wissen über seine Aktivierungslogik ist unvollständig und politisch brisant."
+      ]
+    }
+  ]
+}
+
+```
+
+---
+
+## 8.4 Beispiel: Super-Codex-Payload
+
+```typescript
+{
+  "items": [
+    {
+      "super_codex_id": "99999999-9999-9999-9999-999999999999",
+      "title": "Politische Brisanz des Artefakt-Komplexes",
+      "text": "Wenn Kirk, das Artefakt und Hurston gemeinsam relevant sind, muss beachtet werden, dass persönliche Handlung, militärische Karriere und geopolitische Instrumentalisierung eng miteinander verflochten sind."
+    }
+  ]
+}
+
+```
+
+---
+
+## 8.5 Beispiel: Komplettes Payload für Prompting
+
+```typescript
+{
+  "codex": {
+    "items": [
+      {
+        "codex_entry_id": "11111111-1111-1111-1111-111111111111",
+        "codex_title": "Kirk Washington",
+        "codex_text": "Kirk Washington ist ein junger Mann mit starkem technischen Talent, innerer Unsicherheit und wachsendem strategischem Denken.",
+        "codex_details": [
+          "Er gibt sich zu Beginn seiner Navy-Laufbahn als sein verstorbener Bruder Nate aus."
+        ]
+      },
+      {
+        "codex_entry_id": "33333333-3333-3333-3333-333333333333",
+        "codex_title": "Das Artefakt",
+        "codex_text": "Das Artefakt ist ein außerirdisches Objekt mit biologischer Bindung an Kirk.",
+        "codex_details": [
+          "Seine politische und militärische Bedeutung ist hoch."
+        ]
+      }
+    ]
+  },
+  "super_codex": {
+    "items": [
+      {
+        "super_codex_id": "99999999-9999-9999-9999-999999999999",
+        "title": "Politische Brisanz des Artefakt-Komplexes",
+        "text": "Kirk, Artefakt und Hurston bilden zusammen einen hochsensiblen Macht- und Konfliktkomplex."
+      }
+    ]
+  }
+}
+
+```
+
+---
+
+# 9) Empfohlene Aufrufarchitektur für n8n / Supabase
+
+So würde ich das praktisch schneiden:
+
+## A. Story-Kontext sammeln
+
+- `get_prompt_payload_context(...)`
+
+## B. Codex-IDs ermitteln
+
+- Textbasis zusammensetzen
+
+- `get_matching_codex_ids_from_text(...)`
+
+## C. IDs anreichern
+
+- manuelle IDs
+
+- always-include
+
+- relationale Ergänzungen
+
+## D. Normalen Codex bauen
+
+- `get_prompt_codex_payload_for_beat(...)`
+
+## E. Super-Codex bauen
+
+- Co-Trigger prüfen
+
+- Super-Codex-Payload erzeugen
+
+## F. Alles in Prompt-Platzhalter mappen
+
+---
+
+# 10) Nüchternes Fazit
+
+Das Konzept zur Sammlung der Codex-Einträge ist im Kern:
+
+> **erst finden, dann filtern, dann anreichern, dann aufbereiten**
+
+Sauber getrennt in:
+
+- **Erkennung**
+
+- **Normalisierung**
+
+- **Prompt-Aufbereitung**
+
+- **Super-Codex als zweite Ebene**
+
+Für den normalen Codex ist die Architektur schon recht klar.\
+Beim Super-Codex ist das Fachkonzept ebenfalls klar, aber der exakte technische Altstand der finalen Funktion ist aus meiner Sicht noch nicht belastbar genug, um ihn ohne Sicht auf den alten SQL-Stand als „das ist ganz sicher die Funktion X“ zu behaupten.
+
+Als nächsten Schritt würde ich dir daraus nun die **konkrete Sammelfunktion für normalen Codex plus optionale Super-Codex-Erweiterung** entwerfen — wieder mit Doku, JSON-Beispielen und SQL.
