@@ -1,0 +1,156 @@
+---
+title: get_relevant_inflow_chapters
+---
+# `public.get_relevant_inflow_chapters(...)`
+
+## Zweck
+
+Diese Funktion liefert alle **relevanten Inflow-Kapitel**, die an die zuvor bestimmten Mainflow-Kapitel angeschlossen sind.
+
+Sie ist eine ergänzende Hilfsfunktion zu `get_relevant_mainflow_chapters(...)`.
+
+Die Funktion:
+
+- bestimmt zunächst den relevanten Mainflow
+
+- liest dazu passende Einträge aus `chapter_inflows`
+
+- kann auf **required-only** eingeschränkt werden
+
+- dedupliziert identische Inflow-Kapitel
+
+- liefert zusätzlich den Kontext, an welches Mainflow-Kapitel der Inflow gekoppelt war
+
+Die Deduplizierung ist wichtig, damit ein Inflow-Kapitel nicht mehrfach im Prompt landet, wenn es an mehreren Mainflow-Kapiteln referenziert wurde.
+
+---
+
+## Parameter
+
+### `p_chapter_id uuid`
+
+Das Zielkapitel, relativ zu dem Mainflow und Inflows bestimmt werden.
+
+### `p_compile_series boolean default false`
+
+Steuert, ob nur der aktuelle Roman oder die gesamte Vorgängerlinie über mehrere Romane hinweg berücksichtigt wird.
+
+### `p_required_only boolean default false`
+
+Wenn `true`, werden nur Inflows berücksichtigt, deren Verknüpfung in `chapter_inflows.is_required = true` gesetzt ist.
+
+### `p_include_target boolean default false`
+
+Steuert, ob das Zielkapitel bei der Mainflow-Ermittlung eingeschlossen wird.
+
+Für deinen Prompt-History-Kontext sollte das in der Regel auf `false` stehen, damit nur Inflows zu **früheren** Kapiteln zurückkommen.
+
+---
+
+## Rückgabewerte
+
+| Feld                | Typ       | Bedeutung                                         |
+| ------------------- | --------- | ------------------------------------------------- |
+| `owner_chapter_id`  | `uuid`    | Mainflow-Kapitel, an das der Inflow gekoppelt ist |
+| `inflow_chapter_id` | `uuid`    | ID des Inflow-Kapitels                            |
+| `inflow_sort_order` | `integer` | Sortierwert aus `chapter_inflows`                 |
+| `is_required`       | `boolean` | Kennzeichnung als required                        |
+| `owner_depth`       | `integer` | Tiefe des Owner-Kapitels im Mainflow              |
+
+---
+
+## Aufrufbeispiele
+
+### Variante A: alle Inflows früherer Kapitel
+
+```typescript
+select *
+from public.get_relevant_inflow_chapters(
+  p_chapter_id => '11111111-1111-1111-1111-111111111111'::uuid,
+  p_compile_series => true,
+  p_required_only => false,
+  p_include_target => false
+);
+```
+
+### Variante B: nur required Inflows
+
+```typescript
+select *
+from public.get_relevant_inflow_chapters(
+  p_chapter_id => '11111111-1111-1111-1111-111111111111'::uuid,
+  p_compile_series => false,
+  p_required_only => true,
+  p_include_target => false
+);
+```
+
+---
+
+## Beispielhafte Rückgabe
+
+```typescript
+owner_chapter_id                         inflow_chapter_id                        inflow_sort_order  is_required  owner_depth
+-----------------------------------------------------------------------------------------------------------------------------
+90000000-0000-0000-0000-000000000009    a1000000-0000-0000-0000-000000000001    1                  true         1
+80000000-0000-0000-0000-000000000008    a2000000-0000-0000-0000-000000000002    2                  false        2
+```
+
+---
+
+## SQL-Statement
+
+```typescript
+create or replace function public.get_relevant_inflow_chapters(
+  p_chapter_id uuid,
+  p_compile_series boolean default false,
+  p_required_only boolean default false,
+  p_include_target boolean default false
+)
+returns table (
+  owner_chapter_id uuid,
+  inflow_chapter_id uuid,
+  inflow_sort_order integer,
+  is_required boolean,
+  owner_depth integer
+)
+language sql
+stable
+as $$
+  with mainflow as (
+    select *
+    from public.get_relevant_mainflow_chapters(
+      p_chapter_id => p_chapter_id,
+      p_compile_series => p_compile_series,
+      p_include_target => p_include_target
+    )
+  ),
+  inflows_raw as (
+    select
+      mf.chapter_id as owner_chapter_id,
+      ci.inflow_chapter_id,
+      ci.sort_order as inflow_sort_order,
+      ci.is_required,
+      mf.depth as owner_depth,
+      row_number() over (
+        partition by ci.inflow_chapter_id
+        order by mf.depth asc, ci.sort_order asc, mf.chapter_id
+      ) as rn
+    from mainflow mf
+    join public.chapter_inflows ci
+      on ci.chapter_id = mf.chapter_id
+    where
+      (not p_required_only or ci.is_required = true)
+  )
+  select
+    owner_chapter_id,
+    inflow_chapter_id,
+    inflow_sort_order,
+    is_required,
+    owner_depth
+  from inflows_raw
+  where rn = 1
+  order by owner_depth asc, inflow_sort_order asc, inflow_chapter_id;
+$$;
+```
+

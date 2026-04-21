@@ -1,0 +1,209 @@
+---
+title: get_relevant_mainflow_chapters
+---
+# `public.get_relevant_mainflow_chapters(...)`
+
+## Zweck
+
+Diese Funktion liefert die **relevanten Kapitel im Mainflow** relativ zu einem Zielkapitel.
+
+Sie läuft rückwärts über den Mainflow:
+
+- zuerst über `get_main_predecessor_chapter(...)`
+
+- optional romanübergreifend über `get_main_predecessor_novel(...)`
+
+- und springt dann jeweils auf `get_last_chapter_of_novel(...)`
+
+Die Funktion gibt die Kapitel in einer rekonstruierten Vorgängerlinie zurück.
+
+Sie ist als **Hilfsfunktion** gedacht für:
+
+- globale Verlaufskontexte
+
+- Historienaggregation
+
+- Zusammenführung mit Inflows
+
+Besonders wichtig ist hier der neue Parameter:
+
+### `p_include_target`
+
+Mit diesem Schalter kann festgelegt werden, ob das aktuelle Zielkapitel selbst Teil der Rückgabe sein soll.
+
+Für deinen Prompt-Kontext ist das entscheidend:
+
+- bei **History vor dem aktuellen Kapitel** muss das Zielkapitel **ausgeschlossen** werden
+
+- für andere Spezialfälle kann es aber sinnvoll sein, das Zielkapitel einzubeziehen
+
+---
+
+## Parameter
+
+### `p_chapter_id uuid`
+
+Das Zielkapitel, von dem aus der Mainflow rückwärts bestimmt wird.
+
+### `p_compile_series boolean default false`
+
+Steuert, ob die Aggregation beim Anfang des aktuellen Romans endet oder auf Vorgängerromane der Serie übergreift.
+
+- `false`\
+  nur Vorgänger innerhalb desselben Romans
+
+- `true`\
+  bei fehlendem Kapitel-Vorgänger wird auf den Vorgängerroman gewechselt
+
+### `p_include_target boolean default true`
+
+Steuert, ob das übergebene Zielkapitel selbst in der Rückgabe enthalten ist.
+
+- `true`\
+  Zielkapitel wird mit ausgegeben
+
+- `false`\
+  nur Kapitel **vor** dem Zielkapitel
+
+---
+
+## Rückgabewerte
+
+| Feld           | Typ       | Bedeutung                   |
+| -------------- | --------- | --------------------------- |
+| `chapter_id`   | `uuid`    | ID des Mainflow-Kapitels    |
+| `novel_id`     | `uuid`    | zugehöriger Roman           |
+| `chapter_sort` | `integer` | Sortierung im Roman         |
+| `depth`        | `integer` | Abstand vom Ausgangskapitel |
+
+---
+
+## Aufrufbeispiele
+
+### Variante A: inklusive Zielkapitel
+
+```typescript
+select *
+from public.get_relevant_mainflow_chapters(
+  p_chapter_id => '11111111-1111-1111-1111-111111111111'::uuid,
+  p_compile_series => false,
+  p_include_target => true
+);
+```
+
+### Variante B: nur frühere Kapitel
+
+```typescript
+select *
+from public.get_relevant_mainflow_chapters(
+  p_chapter_id => '11111111-1111-1111-1111-111111111111'::uuid,
+  p_compile_series => true,
+  p_include_target => false
+);
+```
+
+---
+
+## Beispielhafte Rückgabe
+
+```typescript
+chapter_id                              novel_id                                chapter_sort  depth
+---------------------------------------------------------------------------------------------------
+90000000-0000-0000-0000-000000000009    bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb    9             1
+80000000-0000-0000-0000-000000000008    bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb    8             2
+70000000-0000-0000-0000-000000000007    bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb    7             3
+```
+
+In diesem Beispiel wurde das Zielkapitel selbst **nicht** mit ausgegeben.
+
+---
+
+## SQL-Statement
+
+```typescript
+create or replace function public.get_relevant_mainflow_chapters(
+  p_chapter_id uuid,
+  p_compile_series boolean default false,
+  p_include_target boolean default true
+)
+returns table (
+  chapter_id uuid,
+  novel_id uuid,
+  chapter_sort integer,
+  depth integer
+)
+language plpgsql
+stable
+as $$
+declare
+  v_current_chapter_id uuid;
+  v_current_novel_id uuid;
+  v_pred_chapter_id uuid;
+  v_pred_novel_id uuid;
+  v_depth integer := 0;
+  v_first_iteration boolean := true;
+begin
+  v_current_chapter_id := p_chapter_id;
+
+  loop
+    if not v_first_iteration or p_include_target then
+      select c.novel_id
+      into v_current_novel_id
+      from public.chapters c
+      where c.id = v_current_chapter_id;
+
+      if v_current_novel_id is null then
+        exit;
+      end if;
+
+      return query
+      select
+        c.id,
+        c.novel_id,
+        c.sort_order,
+        v_depth
+      from public.chapters c
+      where c.id = v_current_chapter_id;
+    else
+      select c.novel_id
+      into v_current_novel_id
+      from public.chapters c
+      where c.id = v_current_chapter_id;
+
+      if v_current_novel_id is null then
+        exit;
+      end if;
+    end if;
+
+    v_pred_chapter_id := public.get_main_predecessor_chapter(v_current_chapter_id);
+
+    if v_pred_chapter_id is not null then
+      v_current_chapter_id := v_pred_chapter_id;
+      v_depth := v_depth + 1;
+      v_first_iteration := false;
+      continue;
+    end if;
+
+    if not p_compile_series then
+      exit;
+    end if;
+
+    v_pred_novel_id := public.get_main_predecessor_novel(v_current_novel_id);
+
+    if v_pred_novel_id is null then
+      exit;
+    end if;
+
+    v_current_chapter_id := public.get_last_chapter_of_novel(v_pred_novel_id);
+
+    if v_current_chapter_id is null then
+      exit;
+    end if;
+
+    v_depth := v_depth + 1;
+    v_first_iteration := false;
+  end loop;
+end;
+$$;
+```
+

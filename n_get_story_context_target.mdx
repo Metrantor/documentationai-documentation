@@ -1,0 +1,213 @@
+---
+title: get_story_context_target
+---
+# `public.get_story_context_target(...)`
+
+## Zweck
+
+Diese Funktion löst einen gegebenen **Zielanker** auf und liefert die technische Zielposition für weitere Kontextfunktionen.
+
+Sie dient als zentrale Hilfsfunktion, damit nachgelagerte Funktionen nicht selbst zwischen Kapitel- und Beat-Modus unterscheiden müssen.
+
+Die Funktion akzeptiert **entweder**
+
+- eine `chapter_id`
+
+- oder eine `beat_id`
+
+und liefert daraus:
+
+- ob der Zielmodus `"chapter"` oder `"beat"` ist
+
+- zu welcher Serie der Zielpunkt gehört
+
+- zu welchem Roman der Zielpunkt gehört
+
+- zu welchem Kapitel der Zielpunkt gehört
+
+- welche Beat-ID gemeint ist, falls ein Beat übergeben wurde
+
+- die Szenen- und Beat-Sortierung des Zielbeats, falls ein Beat übergeben wurde
+
+Das ist wichtig für:
+
+- exklusive Kontextbildung **vor dem aktuellen Kapitel**
+
+- exklusive Kontextbildung **vor dem aktuellen Beat**
+
+- spätere Aggregationen mit sauberer Trennung zwischen „globalem Verlauf“ und „lokalem Kapitelkontext“
+
+---
+
+## Parameter
+
+### `p_chapter_id uuid default null`
+
+Die ID eines Zielkapitels.
+
+Wenn dieser Parameter gesetzt wird:
+
+- arbeitet die Funktion im **Kapitelmodus**
+
+- `target_mode = 'chapter'`
+
+- es wird **kein** Beat-spezifischer Sortierkontext zurückgegeben
+
+### `p_beat_id uuid default null`
+
+Die ID eines Zielbeats.
+
+Wenn dieser Parameter gesetzt wird:
+
+- arbeitet die Funktion im **Beatmodus**
+
+- `target_mode = 'beat'`
+
+- zusätzlich werden die Sortierposition der Szene und des Beats zurückgegeben
+
+### Regel
+
+Es muss **genau einer** der beiden Parameter gesetzt sein.
+
+Ungültig sind:
+
+- beide `null`
+
+- beide gleichzeitig befüllt
+
+---
+
+## Rückgabewerte
+
+| Feld                | Typ       | Bedeutung                              |
+| ------------------- | --------- | -------------------------------------- |
+| `target_mode`       | `text`    | `'chapter'` oder `'beat'`              |
+| `series_id`         | `uuid`    | Serie des Zielpunkts                   |
+| `novel_id`          | `uuid`    | Roman des Zielpunkts                   |
+| `chapter_id`        | `uuid`    | Kapitel des Zielpunkts                 |
+| `beat_id`           | `uuid`    | Beat des Zielpunkts oder `null`        |
+| `target_scene_sort` | `integer` | Sortierung der Zielszene bei Beatmodus |
+| `target_beat_sort`  | `integer` | Sortierung des Zielbeats bei Beatmodus |
+
+---
+
+## Aufrufbeispiele
+
+### Variante A: Kapitel als Ziel
+
+```typescript
+select *
+from public.get_story_context_target(
+  p_chapter_id => '11111111-1111-1111-1111-111111111111'::uuid
+);
+```
+
+### Variante B: Beat als Ziel
+
+```typescript
+select *
+from public.get_story_context_target(
+  p_beat_id => '22222222-2222-2222-2222-222222222222'::uuid
+);
+```
+
+---
+
+## Beispielhafte Rückgabe
+
+### Rückgabe bei Kapitelmodus
+
+```typescript
+target_mode        = chapter
+series_id          = aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa
+novel_id           = bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb
+chapter_id         = 11111111-1111-1111-1111-111111111111
+beat_id            = null
+target_scene_sort  = null
+target_beat_sort   = null
+```
+
+### Rückgabe bei Beatmodus
+
+```typescript
+target_mode        = beat
+series_id          = aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa
+novel_id           = bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb
+chapter_id         = cccccccc-cccc-cccc-cccc-cccccccccccc
+beat_id            = 22222222-2222-2222-2222-222222222222
+target_scene_sort  = 4
+target_beat_sort   = 2
+```
+
+---
+
+## SQL-Statement
+
+```typescript
+create or replace function public.get_story_context_target(
+  p_chapter_id uuid default null,
+  p_beat_id uuid default null
+)
+returns table (
+  target_mode text,
+  series_id uuid,
+  novel_id uuid,
+  chapter_id uuid,
+  beat_id uuid,
+  target_scene_sort integer,
+  target_beat_sort integer
+)
+language plpgsql
+stable
+as $$
+begin
+  if (p_chapter_id is null and p_beat_id is null)
+     or (p_chapter_id is not null and p_beat_id is not null) then
+    raise exception 'Bitte genau einen Parameter setzen: p_chapter_id ODER p_beat_id';
+  end if;
+
+  if p_chapter_id is not null then
+    return query
+    select
+      'chapter'::text as target_mode,
+      sr.id as series_id,
+      n.id as novel_id,
+      c.id as chapter_id,
+      null::uuid as beat_id,
+      null::integer as target_scene_sort,
+      null::integer as target_beat_sort
+    from public.chapters c
+    join public.novels n on n.id = c.novel_id
+    join public.series sr on sr.id = n.series_id
+    where c.id = p_chapter_id;
+
+    if not found then
+      raise exception 'Kapitel % wurde nicht gefunden', p_chapter_id;
+    end if;
+
+    return;
+  end if;
+
+  return query
+  select
+    'beat'::text as target_mode,
+    sr.id as series_id,
+    n.id as novel_id,
+    c.id as chapter_id,
+    b.id as beat_id,
+    s.sort_order as target_scene_sort,
+    b.sort_order as target_beat_sort
+  from public.beats b
+  join public.scenes s on s.id = b.scene_id
+  join public.chapters c on c.id = s.chapter_id
+  join public.novels n on n.id = c.novel_id
+  join public.series sr on sr.id = n.series_id
+  where b.id = p_beat_id;
+
+  if not found then
+    raise exception 'Beat % wurde nicht gefunden', p_beat_id;
+  end if;
+end;
+$$;
+```
+

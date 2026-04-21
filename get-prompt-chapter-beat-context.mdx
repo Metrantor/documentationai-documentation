@@ -1,0 +1,245 @@
+---
+title: get_prompt_chapter_beat_context
+---
+# `public.get_prompt_chapter_beat_context(...)`
+
+## Zweck
+
+Diese Funktion liefert den **lokalen Kapitelkontext relativ zu einem Zielbeat**.
+
+Sie bildet exakt die drei Prompt-Bausteine, die du für den aktuellen Kapitelverlauf brauchst:
+
+1. `current_chapter_draft_before_beat`\
+   Draft-Text des aktuellen Kapitels **bis exklusiv vor** dem aktuellen Beat
+
+2. `chapter_draft_after_beat`\
+   Draft-Text des aktuellen Kapitels **ab dem aktuellen Beat bis zum Kapitelende**
+
+3. `following_beat_texts`\
+   Beat-Texte des aktuellen Kapitels **nach dem aktuellen Beat** bis Kapitelende
+
+### Wichtige fachliche Regel
+
+`following_beat_texts` beginnt bewusst **nach** dem aktuellen Beat, nicht beim aktuellen Beat selbst.
+
+Der aktuelle Beat gehört in den Prompt bereits separat nach:
+
+- `<beat_instructions>`
+
+Damit vermeidest du die doppelte Rolle des aktuellen Beats als:
+
+- „umzusetzende Anweisung“
+
+- und gleichzeitig „verbotener Zukunftskontext“
+
+---
+
+## Parameter
+
+### `p_beat_id uuid`
+
+Die ID des Zielbeats.
+
+### `p_draft_before_limit integer default 12000`
+
+Maximale Länge für den Textblock vor dem Beat.
+
+### `p_draft_after_limit integer default 12000`
+
+Maximale Länge für den Textblock ab dem Beat.
+
+### `p_following_beat_limit integer default 6000`
+
+Maximale Länge für die nachfolgenden Beat-Texte.
+
+---
+
+## Rückgabewerte
+
+| Feld                                          | Typ       | Bedeutung                  |
+| --------------------------------------------- | --------- | -------------------------- |
+| `current_chapter_draft_before_beat`           | `text`    | Draft-Text vor dem Beat    |
+| `chapter_draft_after_beat`                    | `text`    | Draft-Text ab dem Beat     |
+| `following_beat_texts`                        | `text`    | Beat-Texte nach dem Beat   |
+| `current_chapter_draft_before_beat_truncated` | `boolean` | Vorher-Block gekürzt       |
+| `chapter_draft_after_beat_truncated`          | `boolean` | Nachher-Draftblock gekürzt |
+| `following_beat_texts_truncated`              | `boolean` | Folgebeat-Block gekürzt    |
+
+---
+
+## Aufrufbeispiele
+
+### Standardaufruf
+
+```typescript
+select *
+from public.get_prompt_chapter_beat_context(
+  p_beat_id => '22222222-2222-2222-2222-222222222222'::uuid
+);
+```
+
+### Mit eigenen Limits
+
+```typescript
+select *
+from public.get_prompt_chapter_beat_context(
+  p_beat_id => '22222222-2222-2222-2222-222222222222'::uuid,
+  p_draft_before_limit => 10000,
+  p_draft_after_limit => 8000,
+  p_following_beat_limit => 4000
+);
+```
+
+---
+
+## Beispielhafte Rückgabe
+
+```typescript
+current_chapter_draft_before_beat =
+"Kirk blieb im Türrahmen stehen. Das Summen des Flurs lag noch in seinen Ohren.
+
+Nate sagte nichts. Er deutete nur auf das Motorrad."
+
+chapter_draft_after_beat =
+"Der Regen setzte ein, noch bevor sie die Hauptstraße erreichten.
+
+Die ersten Projektionen des Schulcampus zeichneten sich bereits zwischen den Häusern ab."
+
+following_beat_texts =
+"Kirk bemerkt, dass Nate ungewöhnlich still ist.
+
+An der Schule wird die Rekrutierung der Navy angekündigt.
+
+Kirk reagiert spöttisch, spürt aber unterschwellig Druck."
+
+current_chapter_draft_before_beat_truncated = false
+chapter_draft_after_beat_truncated = false
+following_beat_texts_truncated = false
+```
+
+---
+
+## SQL-Statement
+
+```typescript
+create or replace function public.get_prompt_chapter_beat_context(
+  p_beat_id uuid,
+  p_draft_before_limit integer default 12000,
+  p_draft_after_limit integer default 12000,
+  p_following_beat_limit integer default 6000
+)
+returns table (
+  current_chapter_draft_before_beat text,
+  chapter_draft_after_beat text,
+  following_beat_texts text,
+  current_chapter_draft_before_beat_truncated boolean,
+  chapter_draft_after_beat_truncated boolean,
+  following_beat_texts_truncated boolean
+)
+language plpgsql
+stable
+as $$
+declare
+  v_target record;
+  v_row record;
+  v_block text;
+
+  v_before text := '';
+  v_after text := '';
+  v_following_beats text := '';
+
+  v_before_truncated boolean := false;
+  v_after_truncated boolean := false;
+  v_following_beats_truncated boolean := false;
+begin
+  select *
+  into v_target
+  from public.get_story_context_target(null, p_beat_id);
+
+  for v_row in
+    select
+      s.sort_order as scene_sort,
+      b.sort_order as beat_sort,
+      b.draft_text,
+      b.beat_text
+    from public.scenes s
+    join public.beats b on b.scene_id = s.id
+    where s.chapter_id = v_target.chapter_id
+      and coalesce(b.is_active, true) = true
+    order by s.sort_order, b.sort_order
+  loop
+    if (
+      v_row.scene_sort < v_target.target_scene_sort
+      or (
+        v_row.scene_sort = v_target.target_scene_sort
+        and v_row.beat_sort < v_target.target_beat_sort
+      )
+    ) then
+      v_block := nullif(btrim(coalesce(v_row.draft_text, '')), '');
+      if v_block is not null then
+        if char_length(v_before) + char_length(v_block) + 2 <= p_draft_before_limit then
+          v_before :=
+            case
+              when v_before = '' then v_block
+              else v_before || E'\n\n' || v_block
+            end;
+        else
+          v_before_truncated := true;
+        end if;
+      end if;
+
+    elsif (
+      v_row.scene_sort > v_target.target_scene_sort
+      or (
+        v_row.scene_sort = v_target.target_scene_sort
+        and v_row.beat_sort >= v_target.target_beat_sort
+      )
+    ) then
+      v_block := nullif(btrim(coalesce(v_row.draft_text, '')), '');
+      if v_block is not null then
+        if char_length(v_after) + char_length(v_block) + 2 <= p_draft_after_limit then
+          v_after :=
+            case
+              when v_after = '' then v_block
+              else v_after || E'\n\n' || v_block
+            end;
+        else
+          v_after_truncated := true;
+        end if;
+      end if;
+    end if;
+
+    if (
+      v_row.scene_sort > v_target.target_scene_sort
+      or (
+        v_row.scene_sort = v_target.target_scene_sort
+        and v_row.beat_sort > v_target.target_beat_sort
+      )
+    ) then
+      v_block := nullif(btrim(coalesce(v_row.beat_text, '')), '');
+      if v_block is not null then
+        if char_length(v_following_beats) + char_length(v_block) + 2 <= p_following_beat_limit then
+          v_following_beats :=
+            case
+              when v_following_beats = '' then v_block
+              else v_following_beats || E'\n\n' || v_block
+            end;
+        else
+          v_following_beats_truncated := true;
+        end if;
+      end if;
+    end if;
+  end loop;
+
+  return query
+  select
+    v_before,
+    v_after,
+    v_following_beats,
+    v_before_truncated,
+    v_after_truncated,
+    v_following_beats_truncated;
+end;
+$$;
+```
+

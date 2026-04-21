@@ -1,0 +1,303 @@
+---
+title: get_prompt_history_context
+---
+# `public.get_prompt_history_context(...)`
+
+## Zweck
+
+Diese Funktion baut den **globalen Story-Kontext vor dem aktuellen Kapitel** für Prompting auf.
+
+Sie liefert exakt die beiden Bausteine, die du für den Prompt brauchst:
+
+- `history_drafts`
+
+- `history_summaries`
+
+Dabei gilt:
+
+### `history_drafts`
+
+Enthält die **Draft-Texte aller relevanten Kapitel vor dem aktuellen Kapitel**:
+
+- Mainflow
+
+- relevante Inflows
+
+- dedupliziert
+
+- mit Längenlimit
+
+- nur aktive Beats
+
+- nur nichtleere `draft_text`-Werte
+
+### `history_summaries`
+
+Enthält die **Zusammenfassungen aller relevanten Kapitel vor dem aktuellen Kapitel**:
+
+- Szenenzusammenfassungen
+
+- Kapitelzusammenfassungen
+
+- Mainflow und Inflows
+
+- dedupliziert
+
+- mit eigenem Limit
+
+### Wichtige fachliche Regel
+
+Das aktuelle Zielkapitel selbst wird **nie** berücksichtigt.\
+Das ist die zentrale Abgrenzung zur alten Sammelfunktion.
+
+### Zielanker
+
+Die Funktion kann sowohl mit
+
+- `p_chapter_id`
+
+- als auch mit `p_beat_id`
+
+aufgerufen werden.
+
+Wenn ein Beat übergeben wird, wird zunächst dessen Kapitel bestimmt.\
+Die History bezieht sich dann trotzdem auf **Kapitel vor diesem Kapitel**.
+
+---
+
+## Parameter
+
+### `p_chapter_id uuid default null`
+
+Optionales Zielkapitel.
+
+### `p_beat_id uuid default null`
+
+Optionaler Zielbeat.
+
+### `p_compile_series boolean default false`
+
+Steuert, ob nur frühere Kapitel im aktuellen Roman oder auch Vorgängerromane berücksichtigt werden.
+
+### `p_required_only boolean default false`
+
+Wenn `true`, werden nur required Inflows berücksichtigt.
+
+### `p_draft_limit integer default 12000`
+
+Maximale Länge des aggregierten `history_drafts`-Blocks.
+
+### `p_summary_limit integer default 6000`
+
+Maximale Länge des aggregierten `history_summaries`-Blocks.
+
+---
+
+## Rückgabewerte
+
+| Feld                          | Typ       | Bedeutung                                       |
+| ----------------------------- | --------- | ----------------------------------------------- |
+| `history_drafts`              | `text`    | Draft-Texte früherer Kapitel                    |
+| `history_summaries`           | `text`    | Zusammenfassungen früherer Kapitel              |
+| `history_drafts_truncated`    | `boolean` | Draft-Kontext wurde wegen Limit abgeschnitten   |
+| `history_summaries_truncated` | `boolean` | Summary-Kontext wurde wegen Limit abgeschnitten |
+
+---
+
+## Aufrufbeispiele
+
+### Variante A: Kapitel als Ziel
+
+```typescript
+select *
+from public.get_prompt_history_context(
+  p_chapter_id => '11111111-1111-1111-1111-111111111111'::uuid,
+  p_compile_series => true,
+  p_required_only => false,
+  p_draft_limit => 12000,
+  p_summary_limit => 6000
+);
+```
+
+### Variante B: Beat als Ziel
+
+```typescript
+select *
+from public.get_prompt_history_context(
+  p_beat_id => '22222222-2222-2222-2222-222222222222'::uuid,
+  p_compile_series => true,
+  p_required_only => true,
+  p_draft_limit => 16000,
+  p_summary_limit => 8000
+);
+```
+
+---
+
+## Beispielhafte Rückgabe
+
+```typescript
+history_drafts =
+"Kirk verließ die Wohnung ohne Frühstück. Nate wartete bereits auf dem Motorrad.
+
+Die Luft roch nach Regen, und die Stadt flimmerte in den Projektionen der Frühschicht.
+
+..."
+
+history_summaries =
+"Kirk verschläft und gerät unter Druck. Nate bringt ihn zur Schule.
+Die Spannungen zwischen den Brüdern werden sichtbar.
+
+Eine parallele Inflow-Handlung etabliert politische Spannungen in der Navy.
+
+..."
+
+history_drafts_truncated = false
+history_summaries_truncated = false
+```
+
+---
+
+## SQL-Statement
+
+```typescript
+create or replace function public.get_prompt_history_context(
+  p_chapter_id uuid default null,
+  p_beat_id uuid default null,
+  p_compile_series boolean default false,
+  p_required_only boolean default false,
+  p_draft_limit integer default 12000,
+  p_summary_limit integer default 6000
+)
+returns table (
+  history_drafts text,
+  history_summaries text,
+  history_drafts_truncated boolean,
+  history_summaries_truncated boolean
+)
+language plpgsql
+stable
+as $$
+declare
+  v_target record;
+  v_row record;
+  v_block text;
+
+  v_history_drafts text := '';
+  v_history_summaries text := '';
+  v_history_drafts_truncated boolean := false;
+  v_history_summaries_truncated boolean := false;
+begin
+  select *
+  into v_target
+  from public.get_story_context_target(p_chapter_id, p_beat_id);
+
+  for v_row in
+    with relevant_chapters as (
+      select
+        mf.chapter_id,
+        mf.depth,
+        0 as source_kind,
+        mf.chapter_sort as source_sort
+      from public.get_relevant_mainflow_chapters(
+        p_chapter_id => v_target.chapter_id,
+        p_compile_series => p_compile_series,
+        p_include_target => false
+      ) mf
+
+      union
+
+      select
+        inf.inflow_chapter_id as chapter_id,
+        inf.owner_depth as depth,
+        1 as source_kind,
+        inf.inflow_sort_order as source_sort
+      from public.get_relevant_inflow_chapters(
+        p_chapter_id => v_target.chapter_id,
+        p_compile_series => p_compile_series,
+        p_required_only => p_required_only,
+        p_include_target => false
+      ) inf
+    ),
+    deduped as (
+      select
+        rc.chapter_id,
+        min(rc.depth) as depth,
+        min(rc.source_kind) as source_kind,
+        min(rc.source_sort) as source_sort
+      from relevant_chapters rc
+      group by rc.chapter_id
+    )
+    select
+      d.chapter_id,
+      d.depth,
+      d.source_kind,
+      d.source_sort
+    from deduped d
+    order by d.depth desc, d.source_kind asc, d.source_sort asc, d.chapter_id
+  loop
+    select coalesce(string_agg(b.draft_text, E'\n\n' order by s.sort_order, b.sort_order), '')
+    into v_block
+    from public.scenes s
+    join public.beats b on b.scene_id = s.id
+    where s.chapter_id = v_row.chapter_id
+      and coalesce(b.is_active, true) = true
+      and nullif(btrim(coalesce(b.draft_text, '')), '') is not null;
+
+    if nullif(v_block, '') is not null then
+      if char_length(v_history_drafts) + char_length(v_block) + 2 <= p_draft_limit then
+        v_history_drafts :=
+          case
+            when v_history_drafts = '' then v_block
+            else v_history_drafts || E'\n\n' || v_block
+          end;
+      else
+        v_history_drafts_truncated := true;
+      end if;
+    end if;
+
+    select coalesce(string_agg(x.txt, E'\n\n' order by x.ord1, x.ord2), '')
+    into v_block
+    from (
+      select
+        1 as ord1,
+        s.sort_order as ord2,
+        s.summary as txt
+      from public.scenes s
+      where s.chapter_id = v_row.chapter_id
+        and nullif(btrim(coalesce(s.summary, '')), '') is not null
+
+      union all
+
+      select
+        2 as ord1,
+        999999 as ord2,
+        c.summary as txt
+      from public.chapters c
+      where c.id = v_row.chapter_id
+        and nullif(btrim(coalesce(c.summary, '')), '') is not null
+    ) x;
+
+    if nullif(v_block, '') is not null then
+      if char_length(v_history_summaries) + char_length(v_block) + 2 <= p_summary_limit then
+        v_history_summaries :=
+          case
+            when v_history_summaries = '' then v_block
+            else v_history_summaries || E'\n\n' || v_block
+          end;
+      else
+        v_history_summaries_truncated := true;
+      end if;
+    end if;
+  end loop;
+
+  return query
+  select
+    v_history_drafts,
+    v_history_summaries,
+    v_history_drafts_truncated,
+    v_history_summaries_truncated;
+end;
+$$;
+```
+

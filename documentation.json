@@ -112,6 +112,35 @@
                 "group": "Anwendungs-Oberfläche",
                 "pages": [
                   {
+                    "title": "get_prompt_history_context",
+                    "path": "get-prompt-history-context"
+                  },
+                  {
+                    "group": "Story Context Aggregation V2",
+                    "pages": [
+                      {
+                        "title": "Zusammenfassung der Platzhalter",
+                        "path": "zusammenfassung-der-platzhalter"
+                      },
+                      {
+                        "title": "get_prompt_chapter_beat_context",
+                        "path": "get-prompt-chapter-beat-context"
+                      },
+                      {
+                        "title": "n_get_relevant_inflow_chapters",
+                        "path": "n-get-relevant-inflow-chapters"
+                      },
+                      {
+                        "title": "get_relevant_mainflow_chapters",
+                        "path": "n_get-relevant-mainflow-chapters"
+                      },
+                      {
+                        "title": "get_story_context_target",
+                        "path": "n_get_story_context_target"
+                      }
+                    ]
+                  },
+                  {
                     "group": "Medienerstellung",
                     "pages": [
                       {
@@ -160,10 +189,6 @@
                     ]
                   },
                   {
-                    "title": "get_main_predecessor_novel",
-                    "path": "get-main-predecessor-novel"
-                  },
-                  {
                     "group": "Aura Canvas",
                     "pages": [
                       {
@@ -190,7 +215,7 @@
                     ]
                   },
                   {
-                    "group": "Story Context Aggregation",
+                    "group": "Story Context Aggregation (veraltet)",
                     "pages": [
                       {
                         "title": "Context Compiler",
@@ -322,6 +347,10 @@
                       {
                         "title": "Story Flow (technische Perspektive)",
                         "path": "story-flow-technisch"
+                      },
+                      {
+                        "title": "get_main_predecessor_novel",
+                        "path": "get-main-predecessor-novel"
                       }
                     ]
                   },

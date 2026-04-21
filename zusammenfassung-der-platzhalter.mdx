@@ -1,0 +1,107 @@
+---
+title: Zusammenfassung der Context-Platzhalter im Prompt
+---
+| Platzhalter                           | Inhalt                                                                      | Quelle / Funktion                      | Zweck im Prompt                                                        |
+| ------------------------------------- | --------------------------------------------------------------------------- | -------------------------------------- | ---------------------------------------------------------------------- |
+| `<history_summaries>`                 | Zusammenfassungen aller relevanten Kapitel **vor** dem aktuellen Kapitel    | `get_prompt_history_context(...)`      | Verdichteter Überblick über den bisherigen Verlauf                     |
+| `<history_drafts>`                    | Draft-Texte aller relevanten Kapitel **vor** dem aktuellen Kapitel          | `get_prompt_history_context(...)`      | Sprachlicher und dramaturgischer Anschluss an den bisherigen Fließtext |
+| `<current_chapter_draft_before_beat>` | Draft-Text des aktuellen Kapitels **bis exklusiv vor** dem aktuellen Beat   | `get_prompt_chapter_beat_context(...)` | Lokaler Anschluss im aktuellen Kapitel                                 |
+| `<following_beat_texts>`              | Beat-Texte **nach** dem aktuellen Beat bis Kapitelende                      | `get_prompt_chapter_beat_context(...)` | Zukunftssperre, damit der aktuelle Beat späteres nicht vorwegnimmt     |
+| `<chapter_draft_after_beat>`          | Draft-Text des aktuellen Kapitels **ab dem aktuellen Beat** bis Kapitelende | `get_prompt_chapter_beat_context(...)` | Kollisionsschutz gegen vorhandenen späteren Kapiteltext                |
+| `<codex>`                             | Relevanter normaler Codex-Kontext                                           | bestehende Codex-Funktionen            | Fakten, Weltwissen, Figurenwissen                                      |
+| `<super_codex>`                       | Besonders wichtiger kombinierter Kontext aus Super-Codex-Logik              | bestehende Super-Codex-Logik           | Höher priorisierte kombinierte Regeln / Spezialkontexte                |
+| `<stylesheet>`                        | Stilregeln, Sprachmuster, POV-Logik, Erzählhaltung                          | separates Prompt-/Style-System         | stilistische Kohärenz                                                  |
+| `<beat_instructions>`                 | aktueller Beat, der jetzt umgesetzt werden soll                             | Beat-Datensatz direkt                  | eigentliche Arbeitsanweisung                                           |
+
+# Tabellarische Zusammenfassung der Platzhalter im Prompt
+
+| Platzhalter                           | Inhalt                                                                      | Quelle / Funktion                      | Zweck im Prompt                                                        |
+| ------------------------------------- | --------------------------------------------------------------------------- | -------------------------------------- | ---------------------------------------------------------------------- |
+| `<history_summaries>`                 | Zusammenfassungen aller relevanten Kapitel **vor** dem aktuellen Kapitel    | `get_prompt_history_context(...)`      | Verdichteter Überblick über den bisherigen Verlauf                     |
+| `<history_drafts>`                    | Draft-Texte aller relevanten Kapitel **vor** dem aktuellen Kapitel          | `get_prompt_history_context(...)`      | Sprachlicher und dramaturgischer Anschluss an den bisherigen Fließtext |
+| `<current_chapter_draft_before_beat>` | Draft-Text des aktuellen Kapitels **bis exklusiv vor** dem aktuellen Beat   | `get_prompt_chapter_beat_context(...)` | Lokaler Anschluss im aktuellen Kapitel                                 |
+| `<following_beat_texts>`              | Beat-Texte **nach** dem aktuellen Beat bis Kapitelende                      | `get_prompt_chapter_beat_context(...)` | Zukunftssperre, damit der aktuelle Beat späteres nicht vorwegnimmt     |
+| `<chapter_draft_after_beat>`          | Draft-Text des aktuellen Kapitels **ab dem aktuellen Beat** bis Kapitelende | `get_prompt_chapter_beat_context(...)` | Kollisionsschutz gegen vorhandenen späteren Kapiteltext                |
+| `<codex>`                             | Relevanter normaler Codex-Kontext                                           | bestehende Codex-Funktionen            | Fakten, Weltwissen, Figurenwissen                                      |
+| `<super_codex>`                       | Besonders wichtiger kombinierter Kontext aus Super-Codex-Logik              | bestehende Super-Codex-Logik           | Höher priorisierte kombinierte Regeln / Spezialkontexte                |
+| `<stylesheet>`                        | Stilregeln, Sprachmuster, POV-Logik, Erzählhaltung                          | separates Prompt-/Style-System         | stilistische Kohärenz                                                  |
+| `<beat_instructions>`                 | aktueller Beat, der jetzt umgesetzt werden soll                             | Beat-Datensatz direkt                  | eigentliche Arbeitsanweisung                                           |
+
+---
+
+# Praktische Empfehlung zur Verwendung im Prompt
+
+## Für normale Schreibprompts
+
+In der Regel befüllen:
+
+- `<history_summaries>`
+
+- `<history_drafts>`
+
+- `<current_chapter_draft_before_beat>`
+
+- `<following_beat_texts>`
+
+- `<chapter_draft_after_beat>`
+
+- `<codex>`
+
+- `<super_codex>`
+
+- `<stylesheet>`
+
+- `<beat_instructions>`
+
+## Für sehr kleine oder knappe Prompts
+
+Kann man notfalls reduzieren auf:
+
+- `<history_summaries>`
+
+- `<current_chapter_draft_before_beat>`
+
+- `<following_beat_texts>`
+
+- `<codex>`
+
+- `<beat_instructions>`
+
+## Für Patch-Prompts
+
+Besonders wichtig:
+
+- `<current_chapter_draft_before_beat>`
+
+- `<chapter_draft_after_beat>`
+
+- `<following_beat_texts>`
+
+- `<beat_instructions>`
+
+---
+
+# Nüchterner Hinweis zu den Abhängigkeiten
+
+Diese Funktionspakete setzen voraus, dass folgende Hilfsfunktionen bereits vorhanden und korrekt sind:
+
+- `public.get_main_predecessor_chapter(uuid)`
+
+- `public.get_main_predecessor_novel(uuid)`
+
+- `public.get_last_chapter_of_novel(uuid)`
+
+Außerdem natürlich die Tabellen:
+
+- `chapters`
+
+- `novels`
+
+- `series`
+
+- `scenes`
+
+- `beats`
+
+- `chapter_inflows`
+
