@@ -118,6 +118,10 @@
                         "path": "zusammenfassung-der-platzhalter"
                       },
                       {
+                        "title": "get_prompt_history_context",
+                        "path": "get-prompt-history-context"
+                      },
+                      {
                         "title": "get_prompt_payload_context",
                         "path": "get-prompt-payload-context"
                       },
@@ -147,16 +151,63 @@
                         ]
                       }
                     ]
+                  },
+                  {
+                    "group": "Aura Canvas",
+                    "pages": [
+                      {
+                        "group": "n8n API Aufrufe",
+                        "pages": [
+                          {
+                            "title": "Bedeutung der Canvas Übergabeparameter  an API",
+                            "path": "bedeutung-der-canvas-bergabeparameter-an-api"
+                          },
+                          {
+                            "title": "Kapitelentwurf erstellen",
+                            "path": "kapitelentwurf-erstellen"
+                          }
+                        ]
+                      },
+                      {
+                        "title": "Aura Prompt-Aufba",
+                        "path": "aura-prompt-aufba"
+                      },
+                      {
+                        "title": "Prompts zur Erstellung der Kapitel-Knoten-Inhalte",
+                        "path": "prompts-zur-erstellung-der-kapitel-knoten-inhalte"
+                      }
+                    ]
+                  },
+                  {
+                    "group": "Story States",
+                    "pages": [
+                      {
+                        "title": "Story State Whitepaper",
+                        "path": "story-state-whitepaper"
+                      },
+                      {
+                        "title": "Technische Dokumentation der Story-State-Funktionsfamilie",
+                        "path": "technische-dokumentation-der-story-state-funktionsfamilie"
+                      },
+                      {
+                        "title": "Dokumentation der Story State-Funktionen",
+                        "path": "dokumentation-der-story-state-funktionen"
+                      },
+                      {
+                        "title": "Story State Funktionen (Supabase)",
+                        "path": "story-state-funktionen-supabase"
+                      },
+                      {
+                        "title": "get_story_state_at_beat",
+                        "path": "get-story-state-at-beat"
+                      }
+                    ]
                   }
                 ]
               },
               {
                 "group": "Anwendungs-Funktionen",
                 "pages": [
-                  {
-                    "title": "get_prompt_history_context",
-                    "path": "get-prompt-history-context"
-                  },
                   {
                     "group": "Medienerstellung",
                     "pages": [
@@ -202,32 +253,6 @@
                       {
                         "title": "Lokale Modelle einbinden",
                         "path": "lokale-modelle-einbinden"
-                      }
-                    ]
-                  },
-                  {
-                    "group": "Aura Canvas",
-                    "pages": [
-                      {
-                        "group": "n8n API Aufrufe",
-                        "pages": [
-                          {
-                            "title": "Bedeutung der Canvas Übergabeparameter  an API",
-                            "path": "bedeutung-der-canvas-bergabeparameter-an-api"
-                          },
-                          {
-                            "title": "Kapitelentwurf erstellen",
-                            "path": "kapitelentwurf-erstellen"
-                          }
-                        ]
-                      },
-                      {
-                        "title": "Aura Prompt-Aufba",
-                        "path": "aura-prompt-aufba"
-                      },
-                      {
-                        "title": "Prompts zur Erstellung der Kapitel-Knoten-Inhalte",
-                        "path": "prompts-zur-erstellung-der-kapitel-knoten-inhalte"
                       }
                     ]
                   },
@@ -332,31 +357,6 @@
                             "path": "coder-erstellung-fr-propmt"
                           }
                         ]
-                      }
-                    ]
-                  },
-                  {
-                    "group": "Story States",
-                    "pages": [
-                      {
-                        "title": "Story State Whitepaper",
-                        "path": "story-state-whitepaper"
-                      },
-                      {
-                        "title": "Technische Dokumentation der Story-State-Funktionsfamilie",
-                        "path": "technische-dokumentation-der-story-state-funktionsfamilie"
-                      },
-                      {
-                        "title": "Dokumentation der Story State-Funktionen",
-                        "path": "dokumentation-der-story-state-funktionen"
-                      },
-                      {
-                        "title": "Story State Funktionen (Supabase)",
-                        "path": "story-state-funktionen-supabase"
-                      },
-                      {
-                        "title": "get_story_state_at_beat",
-                        "path": "get-story-state-at-beat"
                       }
                     ]
                   },
