@@ -1,0 +1,161 @@
+---
+title: get_llm_model_config_flat
+---
+### `get_llm_model_config_flat(p_model_id uuid)`
+
+**Zweck:**\
+Liefert alle relevanten Konfigurationsdaten eines LLM-Modells zusammen mit den zugehörigen Provider-Daten als flaches JSON-Objekt.\
+Die Felder werden über Namespace-Schlüssel eindeutig benannt, z. B. `model.name`, `provider.api_token` oder `model.parameters.temperature`.
+
+---
+
+### Aufrufparameter
+
+| Parameter    | Typ    | Beschreibung                                       |
+| ------------ | ------ | -------------------------------------------------- |
+| `p_model_id` | `uuid` | ID des gewünschten LLM-Modells aus `llm_models.id` |
+
+---
+
+## Aufrufbeispiel
+
+```typescript
+select public.get_llm_model_config_flat(
+  '3f7f8c4e-1234-4567-89ab-0a1b2c3d4e5f'::uuid
+);
+```
+
+## Beispielrückgabe
+
+```typescript
+{
+  "model.id": "3f7f8c4e-1234-4567-89ab-0a1b2c3d4e5f",
+  "model.name": "Qwen lokal",
+  "model.provider_model_id": "qwen3-14b",
+  "model.model_family": "qwen",
+  "model.is_active": true,
+  "model.nsfw": false,
+  "model.price_per_1000_input_tokens": 0,
+  "model.price_per_1000_output_tokens": 0,
+  "model.currency": "EUR",
+  "model.context_window_tokens": 32768,
+  "model.max_output_tokens": 4096,
+  "model.supports_json_mode": true,
+  "model.supports_tools": false,
+  "model.supports_vision": false,
+  "model.supports_streaming": true,
+  "model.display_order": 10,
+  "model.parameters.temperature": 0.7,
+  "model.parameters.top_p": 0.9,
+  "provider.id": "9aa0b1c2-2222-3333-4444-555566667777",
+  "provider.name": "LM Studio lokal",
+  "provider.source": "lm_studio",
+  "provider.base_url": "http://localhost:1234/v1",
+  "provider.api_token": "lm-studio"
+}
+```
+
+## Verwendung in n8n
+
+Nach dem Supabase/RPC-Aufruf kannst du z. B. zugreifen auf:
+
+```typescript
+$item(0).$json["model.provider_model_id"]
+```
+
+```typescript
+$item(0).$json["provider.base_url"]
+```
+
+```typescript
+$item(0).$json["model.parameters.temperature"]
+```
+
+### Rückgabe
+
+Typ: `jsonb`
+
+Beispiel:
+
+```typescript
+{
+  "model.id": "…",
+  "model.name": "Llama lokal",
+  "model.provider_model_id": "llama-3.1-8b-instruct",
+  "model.is_active": true,
+  "model.supports_json_mode": true,
+  "model.parameters.temperature": 0.7,
+  "model.parameters.top_p": 0.9,
+  "provider.id": "…",
+  "provider.name": "LM Studio",
+  "provider.source": "lm_studio",
+  "provider.base_url": "http://localhost:1234/v1",
+  "provider.api_token": "…"
+}
+```
+
+---
+
+### Beispielaufruf
+
+```typescript
+select public.get_llm_model_config_flat(
+  'MODELL-UUID-HIER'::uuid
+);
+```
+
+Die Funktion ist besonders nützlich für n8n, Prompt-Ausführung und Agentenlogik, weil alle benötigten Werte direkt über flache Keys adressierbar sind.
+
+SQL
+
+```typescript
+create or replace function public.get_llm_model_config_flat(p_model_id uuid)
+returns jsonb
+language sql
+stable
+as $$
+  with selected as (
+    select
+      m.*,
+      p.id as provider_id_real,
+      p.name as provider_name,
+      p.source as provider_source,
+      p.api_token as provider_api_token,
+      p.base_url as provider_base_url,
+      p.note as provider_note,
+      p.is_active as provider_is_active,
+      p.created_at as provider_created_at,
+      p.updated_at as provider_updated_at
+    from public.llm_models m
+    join public.llm_providers p
+      on p.id = m.provider_id
+    where m.id = p_model_id
+    limit 1
+  ),
+  flat as (
+    select 'model.' || key as key, value
+    from selected, jsonb_each(to_jsonb(selected) - 'provider_id' - 'parameters'
+      - 'provider_id_real' - 'provider_name' - 'provider_source'
+      - 'provider_api_token' - 'provider_base_url' - 'provider_note'
+      - 'provider_is_active' - 'provider_created_at' - 'provider_updated_at')
+
+    union all
+
+    select 'model.parameters.' || key as key, value
+    from selected, jsonb_each(coalesce(selected.parameters, '{}'::jsonb))
+
+    union all select 'provider.id', to_jsonb(provider_id_real) from selected
+    union all select 'provider.name', to_jsonb(provider_name) from selected
+    union all select 'provider.source', to_jsonb(provider_source) from selected
+    union all select 'provider.api_token', to_jsonb(provider_api_token) from selected
+    union all select 'provider.base_url', to_jsonb(trim(provider_base_url)) from selected
+    union all select 'provider.note', to_jsonb(provider_note) from selected
+    union all select 'provider.is_active', to_jsonb(provider_is_active) from selected
+    union all select 'provider.created_at', to_jsonb(provider_created_at) from selected
+    union all select 'provider.updated_at', to_jsonb(provider_updated_at) from selected
+  )
+  select coalesce(jsonb_object_agg(key, value), '{}'::jsonb)
+  from flat;
+$$;
+```
+

@@ -1,0 +1,603 @@
+---
+title: Tabellenbeschreibung
+---
+### `llm_providers`
+
+Verwaltet die technischen Quellen, über die LLMs angesprochen werden.
+
+| Feld         | Zweck                                       |
+| ------------ | ------------------------------------------- |
+| `id`         | Eindeutige Provider-ID                      |
+| `name`       | Anzeigename, z. B. „OpenAI Hauptaccount“    |
+| `source`     | Quelle: `openai`, `openrouter`, `lm_studio` |
+| `api_token`  | API-Schlüssel für den Zugriff               |
+| `base_url`   | Basis-URL, besonders wichtig für LM Studio  |
+| `note`       | Freitextnotiz                               |
+| `is_active`  | Provider ist nutzbar                        |
+| `created_at` | Anlagezeitpunkt                             |
+| `updated_at` | Letzte Änderung                             |
+
+---
+
+```typescript
+create table llm_providers (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  source text not null check (source in ('openai', 'openrouter', 'lm_studio')),
+  api_token text,
+  base_url text,
+  note text,
+  is_active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+```
+
+### `llm_models`
+
+Verwaltet die konkreten Text-Sprachmodelle.
+
+| Feld                           | Zweck                                       |
+| ------------------------------ | ------------------------------------------- |
+| `id`                           | Eindeutige Modell-ID                        |
+| `provider_id`                  | Verweis auf den zugehörigen Provider        |
+| `name`                         | Anzeigename des Modells                     |
+| `provider_model_id`            | Technische Modellkennung für API-Aufrufe    |
+| `model_family`                 | Modellfamilie, z. B. `gpt`, `llama`, `qwen` |
+| `note`                         | Freitextnotiz                               |
+| `nsfw`                         | Nutzung für NSFW-Inhalte erlaubt            |
+| `is_active`                    | Modell ist nutzbar                          |
+| `price_per_1000_input_tokens`  | Preis je 1000 Input-Tokens                  |
+| `price_per_1000_output_tokens` | Preis je 1000 Output-Tokens                 |
+| `currency`                     | Währung der Preise                          |
+| `context_window_tokens`        | Maximale Kontextgröße                       |
+| `max_output_tokens`            | Maximale Antwortlänge                       |
+| `supports_json_mode`           | Unterstützt JSON-/Structured-Output-Modus   |
+| `supports_tools`               | Unterstützt Tool Calling                    |
+| `supports_vision`              | Unterstützt Bildverarbeitung                |
+| `supports_streaming`           | Unterstützt Streaming-Ausgabe               |
+| `display_order`                | Sortierung in der Oberfläche                |
+| `parameters`                   | Flexible Modellparameter als JSONB          |
+| `created_at`                   | Anlagezeitpunkt                             |
+| `updated_at`                   | Letzte Änderung                             |
+| tag                            | Feld zum tagging                            |
+
+### SQL
+
+```typescript
+create table llm_models (
+  id uuid primary key default gen_random_uuid(),
+
+  provider_id uuid not null references llm_providers(id) on delete cascade,
+
+  name text not null,
+  provider_model_id text not null,
+  note text,
+
+  nsfw boolean not null default false,
+  is_active boolean not null default true,
+  is_default boolean not null default false,
+
+  price_per_1000_input_tokens numeric(12, 8),
+  price_per_1000_output_tokens numeric(12, 8),
+  currency text not null default 'USD',
+
+  context_window_tokens integer,
+  max_output_tokens integer,
+
+  supports_json_mode boolean not null default false,
+  supports_tools boolean not null default false,
+  supports_vision boolean not null default false,
+  supports_streaming boolean not null default true,
+
+  parameters jsonb not null default '{}'::jsonb,
+
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+```
+
+### &#x20;llm\_model\_usage
+
+## Zweck der Tabelle
+
+`public.llm_model_usage` speichert jede Nutzung eines LLM-Modells im System. Die Tabelle dient zur Erfassung von:
+
+- Modell- und Providerinformationen
+
+- Zeitpunkt der Nutzung
+
+- fachlichem Kontext, z. B. Series, Novel, Chapter, Scene, Beat
+
+- Tokenverbrauch
+
+- geschätzten oder echten Verbrauchsdaten
+
+- Kosten
+
+- n8n-Workflow- und Execution-Bezug
+
+- optionalen Metadaten
+
+Damit ist die Tabelle die Grundlage für Kostenkontrolle, Nutzungsanalyse, Modellvergleich, Prompt-Controlling und spätere Governance-Auswertungen.
+
+---
+
+## Feldbeschreibung
+
+| Feld                | Typ             | Pflicht | Beschreibung                                                                                                                                        |
+| ------------------- | --------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                | `uuid`          | ja      | Eindeutige ID des Nutzungseintrags. Wird automatisch per `gen_random_uuid()` erzeugt.                                                               |
+| `model_id`          | `uuid`          | nein    | Interne Referenz auf ein Modell in deiner eigenen Modell-Konfigurationstabelle.                                                                     |
+| `provider_id`       | `uuid`          | nein    | Interne Referenz auf den Provider, z. B. OpenAI, LM Studio, OpenRouter, Anthropic oder lokale Modelle.                                              |
+| `provider_model_id` | `text`          | nein    | Exakte technische Modell-ID, wie sie beim Provider verwendet wird, z. B. `mn-captainerisnebula-12b-chimera-v1.1-heretic-uncensored-abliterated-i1`. |
+| `model_name`        | `text`          | nein    | Lesbarer Modellname für Auswertungen und Anzeigezwecke.                                                                                             |
+| `provider_name`     | `text`          | nein    | Lesbarer Providername, z. B. `LM Studio`, `OpenAI`, `OpenRouter`.                                                                                   |
+| `used_at`           | `timestamptz`   | ja      | Zeitpunkt der Modellnutzung. Standardwert ist `now()`.                                                                                              |
+| `series_id`         | `uuid`          | nein    | Fachlicher Bezug zu einer Romanserie oder Projektserie.                                                                                             |
+| `novel_id`          | `uuid`          | nein    | Bezug zu einem konkreten Roman innerhalb einer Serie.                                                                                               |
+| `chapter_id`        | `uuid`          | nein    | Bezug zu einem Kapitel.                                                                                                                             |
+| `scene_id`          | `uuid`          | nein    | Bezug zu einer Szene.                                                                                                                               |
+| `beat_id`           | `uuid`          | nein    | Bezug zu einem Beat.                                                                                                                                |
+| `tag`               | `text`          | nein    | Frei nutzbare fachliche Markierung, z. B. `chapter_draft`, `rewrite`, `critique`, `summary`, `codex_generation`.                                    |
+| `input_tokens`      | `integer`       | ja      | Anzahl der Input-Tokens. Bei echten Providerdaten exakt, bei geschätzten Werten näherungsweise. Standardwert `0`.                                   |
+| `output_tokens`     | `integer`       | ja      | Anzahl der Output-Tokens. Bei echten Providerdaten exakt, bei geschätzten Werten näherungsweise. Standardwert `0`.                                  |
+| `total_tokens`      | `integer`       | ja      | Automatisch berechnete Summe aus `input_tokens + output_tokens`. Diese Spalte wird von Postgres generiert und nicht manuell befüllt.                |
+| `input_chars`       | `integer`       | nein    | Zeichenanzahl des Input-Texts. Besonders wichtig, wenn Tokens anhand der Textlänge geschätzt werden.                                                |
+| `output_chars`      | `integer`       | nein    | Zeichenanzahl des Output-Texts. Besonders wichtig, wenn Tokens anhand der Textlänge geschätzt werden.                                               |
+| `cost`              | `numeric(18,8)` | ja      | Berechnete Kosten des Modellaufrufs. Bei lokalen Modellen oder nicht berechneten Kosten typischerweise `0`.                                         |
+| `currency`          | `text`          | ja      | Währung der Kostenangabe, z. B. `EUR` oder `USD`. Standardwert `EUR`.                                                                               |
+| `estimated`         | `boolean`       | ja      | Kennzeichnet, ob die Tokenwerte geschätzt wurden. `false` = echte API-/Providerdaten, `true` = geschätzte Werte.                                    |
+| `estimation_method` | `text`          | nein    | Methode oder Herkunft der Verbrauchsdaten, z. B. `api_usage`, `chars_div_3_3_input_3_6_output`.                                                     |
+| `workflow_id`       | `text`          | nein    | Technische ID oder Kennung des n8n-Workflows.                                                                                                       |
+| `execution_id`      | `text`          | nein    | ID der konkreten n8n-Ausführung. Nützlich zur Rückverfolgung einzelner Runs.                                                                        |
+| `node_name`         | `text`          | nein    | Name des n8n-Knotens, der den Modellaufruf ausgelöst hat, z. B. `AI Agent`, `HTTP Request`, `Chapter Draft Agent`.                                  |
+| `metadata`          | `jsonb`         | ja      | Freies JSON-Feld für Zusatzdaten, Rohdaten, Providerantworten, Prompt-Konfigurationen oder n8n-Kontext. Standardwert `{}`.                          |
+| `created_at`        | `timestamptz`   | ja      | Zeitpunkt, zu dem der Datensatz in der Tabelle angelegt wurde. Standardwert `now()`.                                                                |
+
+---
+
+## Bedeutung von `estimated`
+
+Das Feld `estimated` ist wichtig, weil du zwei Arten von Nutzungsdaten unterscheiden musst.
+
+### Echte Providerdaten
+
+```typescript
+estimated = false
+estimation_method = 'api_usage'
+```
+
+Das bedeutet: Die Tokenzahlen stammen direkt aus der Antwort des Modells oder Providers, z. B. aus einem Feld wie:
+
+```typescript
+"usage": {
+  "prompt_tokens": 1200,
+  "completion_tokens": 450,
+  "total_tokens": 1650
+}
+```
+
+### Geschätzte Verbrauchsdaten
+
+```typescript
+estimated = true
+estimation_method = 'chars_div_3_3_input_3_6_output'
+```
+
+Das bedeutet: Die Tokenzahlen wurden anhand der Textlänge geschätzt, etwa so:
+
+```typescript
+input_tokens  ≈ input_chars / 3.3
+output_tokens ≈ output_chars / 3.6
+```
+
+Das ist besonders nützlich beim n8n AI Agent Node, wenn dieser zwar eine Antwort liefert, aber keine Token-Usage im Output mitgibt.
+
+---
+
+## Typische Nutzung
+
+Die Tabelle kann für folgende Auswertungen genutzt werden:
+
+| Auswertung                        | Nutzen                                                                    |
+| --------------------------------- | ------------------------------------------------------------------------- |
+| Verbrauch pro Modell              | Welche Modelle werden wie intensiv genutzt?                               |
+| Verbrauch pro Provider            | Vergleich zwischen LM Studio, OpenRouter, OpenAI usw.                     |
+| Kosten pro Kapitel / Szene / Beat | Controlling für Roman- oder Content-Erstellung.                           |
+| Kosten pro Workflow               | Welche n8n-Flows verursachen die meisten Modellkosten?                    |
+| Anteil geschätzter Werte          | Wie belastbar sind die Verbrauchsdaten?                                   |
+| Modellvergleich nach Aufgabe      | Welche Modelle werden für Draft, Rewrite, Kritik, Summary usw. verwendet? |
+| Trendanalyse über Zeit            | Wie entwickelt sich der Verbrauch über Tage, Wochen oder Monate?          |
+
+---
+
+## Beispielhafte Tags
+
+Für `tag` könntest du solche Werte verwenden:
+
+| Tag                | Bedeutung                                       |
+| ------------------ | ----------------------------------------------- |
+| `chapter_draft`    | Erstellung eines Kapitelentwurfs                |
+| `scene_draft`      | Erstellung einer Szene                          |
+| `beat_draft`       | Ausformulierung eines Beats                     |
+| `rewrite`          | Überarbeitung bestehenden Texts                 |
+| `critique`         | Kritik / Analyse eines Texts                    |
+| `style_analysis`   | Analyse des Schreibstils                        |
+| `summary`          | Zusammenfassung                                 |
+| `codex_generation` | Erstellung oder Erweiterung von Codex-Einträgen |
+| `prompt_test`      | Testlauf eines Prompts                          |
+| `agent_run`        | Allgemeiner Agentenlauf                         |
+
+|   |
+| - |
+
+```typescript
+-- ============================================================
+-- Tabelle: public.llm_model_usage
+-- Zweck:
+--   Speichert LLM-Nutzungsdaten, Tokenverbrauch, Kosten,
+--   Kontextbezug und technische Workflow-Referenzen.
+--
+-- Hinweis:
+--   estimated = false  -> echte Usage-Daten aus API / Provider
+--   estimated = true   -> Tokenwerte wurden geschätzt
+-- ============================================================
+
+
+-- UUID-Unterstützung sicherstellen
+create extension if not exists pgcrypto;
+
+
+-- ============================================================
+-- 1) Tabelle anlegen
+-- ============================================================
+
+create table if not exists public.llm_model_usage (
+  id uuid primary key default gen_random_uuid(),
+
+  -- Bezug zum Modell / Provider
+  model_id uuid,
+  provider_id uuid,
+  provider_model_id text,
+  model_name text,
+  provider_name text,
+
+  -- Zeitpunkt der Nutzung
+  used_at timestamptz not null default now(),
+
+  -- Kontext / fachliche Zuordnung
+  series_id uuid,
+  novel_id uuid,
+  chapter_id uuid,
+  scene_id uuid,
+  beat_id uuid,
+
+  -- Frei nutzbare Markierung, z. B.:
+  -- chapter_draft, rewrite, critique, summary, codex_generation
+  tag text,
+
+  -- Token-Verbrauch
+  input_tokens integer not null default 0,
+  output_tokens integer not null default 0,
+
+  -- Automatisch berechnete Gesamttokens
+  total_tokens integer generated always as (input_tokens + output_tokens) stored,
+
+  -- Zeichenlängen, vor allem bei geschätzten Tokens hilfreich
+  input_chars integer,
+  output_chars integer,
+
+  -- Kosten
+  cost numeric(18, 8) not null default 0,
+  currency text not null default 'EUR',
+
+  -- Herkunft der Verbrauchsdaten
+  estimated boolean not null default false,
+  estimation_method text,
+
+  -- Optionale technische Referenzen
+  workflow_id text,
+  execution_id text,
+  node_name text,
+
+  -- Optionale Rohdaten / Zusatzinfos
+  metadata jsonb not null default '{}'::jsonb,
+
+  -- Audit
+  created_at timestamptz not null default now()
+);
+
+
+-- ============================================================
+-- 2) Bestehende Tabelle robust ergänzen
+--    Falls public.llm_model_usage schon existierte
+-- ============================================================
+
+alter table public.llm_model_usage
+add column if not exists model_id uuid,
+add column if not exists provider_id uuid,
+add column if not exists provider_model_id text,
+add column if not exists model_name text,
+add column if not exists provider_name text,
+add column if not exists used_at timestamptz not null default now(),
+add column if not exists series_id uuid,
+add column if not exists novel_id uuid,
+add column if not exists chapter_id uuid,
+add column if not exists scene_id uuid,
+add column if not exists beat_id uuid,
+add column if not exists tag text,
+add column if not exists input_tokens integer not null default 0,
+add column if not exists output_tokens integer not null default 0,
+add column if not exists input_chars integer,
+add column if not exists output_chars integer,
+add column if not exists cost numeric(18, 8) not null default 0,
+add column if not exists currency text not null default 'EUR',
+add column if not exists estimated boolean not null default false,
+add column if not exists estimation_method text,
+add column if not exists workflow_id text,
+add column if not exists execution_id text,
+add column if not exists node_name text,
+add column if not exists metadata jsonb not null default '{}'::jsonb,
+add column if not exists created_at timestamptz not null default now();
+
+
+-- ============================================================
+-- 3) total_tokens ergänzen, falls Tabelle schon existierte
+--    und die generierte Spalte noch fehlt
+-- ============================================================
+
+do $$
+begin
+  if not exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'llm_model_usage'
+      and column_name = 'total_tokens'
+  ) then
+    alter table public.llm_model_usage
+    add column total_tokens integer
+    generated always as (input_tokens + output_tokens) stored;
+  end if;
+end $$;
+
+
+-- ============================================================
+-- 4) Constraints robust ergänzen
+-- ============================================================
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'llm_model_usage_input_tokens_non_negative'
+  ) then
+    alter table public.llm_model_usage
+    add constraint llm_model_usage_input_tokens_non_negative
+    check (input_tokens >= 0);
+  end if;
+
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'llm_model_usage_output_tokens_non_negative'
+  ) then
+    alter table public.llm_model_usage
+    add constraint llm_model_usage_output_tokens_non_negative
+    check (output_tokens >= 0);
+  end if;
+
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'llm_model_usage_input_chars_non_negative'
+  ) then
+    alter table public.llm_model_usage
+    add constraint llm_model_usage_input_chars_non_negative
+    check (input_chars is null or input_chars >= 0);
+  end if;
+
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'llm_model_usage_output_chars_non_negative'
+  ) then
+    alter table public.llm_model_usage
+    add constraint llm_model_usage_output_chars_non_negative
+    check (output_chars is null or output_chars >= 0);
+  end if;
+
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'llm_model_usage_cost_non_negative'
+  ) then
+    alter table public.llm_model_usage
+    add constraint llm_model_usage_cost_non_negative
+    check (cost >= 0);
+  end if;
+end $$;
+
+
+-- ============================================================
+-- 5) Indexe
+-- ============================================================
+
+create index if not exists idx_llm_model_usage_used_at
+on public.llm_model_usage (used_at desc);
+
+create index if not exists idx_llm_model_usage_model_id
+on public.llm_model_usage (model_id);
+
+create index if not exists idx_llm_model_usage_provider_id
+on public.llm_model_usage (provider_id);
+
+create index if not exists idx_llm_model_usage_provider_model_id
+on public.llm_model_usage (provider_model_id);
+
+create index if not exists idx_llm_model_usage_series_id
+on public.llm_model_usage (series_id);
+
+create index if not exists idx_llm_model_usage_novel_id
+on public.llm_model_usage (novel_id);
+
+create index if not exists idx_llm_model_usage_chapter_id
+on public.llm_model_usage (chapter_id);
+
+create index if not exists idx_llm_model_usage_scene_id
+on public.llm_model_usage (scene_id);
+
+create index if not exists idx_llm_model_usage_beat_id
+on public.llm_model_usage (beat_id);
+
+create index if not exists idx_llm_model_usage_tag
+on public.llm_model_usage (tag);
+
+create index if not exists idx_llm_model_usage_estimated
+on public.llm_model_usage (estimated);
+
+create index if not exists idx_llm_model_usage_workflow_id
+on public.llm_model_usage (workflow_id);
+
+create index if not exists idx_llm_model_usage_execution_id
+on public.llm_model_usage (execution_id);
+
+
+-- ============================================================
+-- 6) Kommentar zur Tabelle
+-- ============================================================
+
+comment on table public.llm_model_usage is
+'Speichert LLM-Nutzungsdaten, Tokenverbrauch, Kosten, Kontextbezüge und Workflow-Referenzen.';
+
+comment on column public.llm_model_usage.estimated is
+'false = echte Provider/API-Usage; true = geschätzte Tokenwerte.';
+
+comment on column public.llm_model_usage.estimation_method is
+'Methode der Schätzung oder Herkunft der Usage-Daten, z. B. api_usage oder chars_div_3_3_input_3_6_output.';
+
+comment on column public.llm_model_usage.total_tokens is
+'Automatisch berechnete Summe aus input_tokens und output_tokens.';
+
+comment on column public.llm_model_usage.metadata is
+'Freies JSONB-Feld für Rohdaten, Providerantworten, n8n-Kontext oder Zusatzinformationen.';
+
+
+-- ============================================================
+-- 7) Beispiel: Insert für echte API-Usage
+-- ============================================================
+
+/*
+insert into public.llm_model_usage (
+  model_id,
+  provider_id,
+  provider_model_id,
+  model_name,
+  provider_name,
+  used_at,
+  series_id,
+  novel_id,
+  chapter_id,
+  scene_id,
+  beat_id,
+  tag,
+  input_tokens,
+  output_tokens,
+  input_chars,
+  output_chars,
+  cost,
+  currency,
+  estimated,
+  estimation_method,
+  workflow_id,
+  execution_id,
+  node_name,
+  metadata
+)
+values (
+  null,
+  null,
+  'mn-captainerisnebula-12b-chimera-v1.1-heretic-uncensored-abliterated-i1',
+  'Captain Eris Nebula 12B Chimera',
+  'LM Studio',
+  now(),
+  null,
+  null,
+  null,
+  null,
+  null,
+  'chapter_draft',
+  1200,
+  450,
+  null,
+  null,
+  0.00000000,
+  'EUR',
+  false,
+  'api_usage',
+  'workflow-id',
+  'execution-id',
+  'AI Agent',
+  '{}'::jsonb
+);
+*/
+
+
+-- ============================================================
+-- 8) Beispiel: Insert für geschätzte Usage
+-- ============================================================
+
+/*
+insert into public.llm_model_usage (
+  provider_model_id,
+  model_name,
+  provider_name,
+  used_at,
+  series_id,
+  novel_id,
+  chapter_id,
+  scene_id,
+  beat_id,
+  tag,
+  input_tokens,
+  output_tokens,
+  input_chars,
+  output_chars,
+  cost,
+  currency,
+  estimated,
+  estimation_method,
+  workflow_id,
+  execution_id,
+  node_name,
+  metadata
+)
+values (
+  'mn-captainerisnebula-12b-chimera-v1.1-heretic-uncensored-abliterated-i1',
+  'Captain Eris Nebula 12B Chimera',
+  'LM Studio',
+  now(),
+  null,
+  null,
+  null,
+  null,
+  null,
+  'chapter_draft',
+  900,
+  320,
+  2970,
+  1152,
+  0.00000000,
+  'EUR',
+  true,
+  'chars_div_3_3_input_3_6_output',
+  'workflow-id',
+  'execution-id',
+  'AI Agent',
+  '{"source": "n8n_ai_agent_output"}'::jsonb
+);
+*/
+```
+
