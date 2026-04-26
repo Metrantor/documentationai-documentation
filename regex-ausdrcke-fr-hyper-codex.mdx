@@ -1,0 +1,617 @@
+---
+title: Regex-für Hyper-Codex
+---
+# Regex-Dokumentation für den Hyper-Codex
+
+Die Regex-Trigger laufen in PostgreSQL aktuell über:
+
+```typescript
+beat_text_normalized ~* trigger_value
+```
+
+Das bedeutet:
+
+- `~*` = Regex-Match&#x20;
+
+- **case-insensitive**&#x20;
+
+- &#x20;gegen den bereits in Kleinbuchstaben normalisierten Beat-Text&#x20;
+
+Praktisch heißt das:
+
+- &#x20;Groß-/Kleinschreibung musst du in der Regel nicht mehr extra abbilden&#x20;
+
+- &#x20;du kannst dich auf Muster konzentrieren&#x20;
+
+---
+
+## 6.1 Was ist Regex überhaupt?
+
+Regex ist eine **Mustersprache**, mit der du Text nicht nur als exakte Phrase, sondern als Struktur beschreiben kannst.
+
+Beispiel:
+
+- &#x20;Phrase: `reaktor`&#x20;
+
+- &#x20;Regex: `\b(reaktor|antrieb|kern)\b`&#x20;
+
+Die Phrase matcht nur genau `reaktor`.\
+&#x20;Der Regex matcht eines von drei ganzen Wörtern.
+
+---
+
+## 6.2 Wann solltest du Regex benutzen?
+
+## Gut geeignet für Regex
+
+- &#x20;mehrere Varianten&#x20;
+
+- &#x20;Singular/Plural&#x20;
+
+- &#x20;alternative Schreibweisen&#x20;
+
+- &#x20;zusammengesetzte Muster&#x20;
+
+- &#x20;wenn zwischen zwei Begriffen noch etwas stehen darf&#x20;
+
+## Nicht nötig für Regex
+
+- &#x20;einfache einzelne Begriffe&#x20;
+
+- &#x20;einfache Phrasen&#x20;
+
+- &#x20;Dinge, die du als normalen Tag pflegen kannst&#x20;
+
+### Faustregel
+
+- **Standard:** Phrase&#x20;
+
+- **Sonderfall:** Regex&#x20;
+
+---
+
+## 6.3 Wichtige Regex-Bausteine
+
+## A. Normale Zeichen
+
+```typescript
+reaktor
+```
+
+Matcht `reaktor`.
+
+---
+
+## B. Punkt `.`
+
+```typescript
+rea.tor
+```
+
+Der Punkt steht für **genau ein beliebiges Zeichen**.
+
+Matcht z. B.:
+
+- `reaktor`&#x20;
+
+- `reabtor`&#x20;
+
+---
+
+## C. Stern `*`
+
+```typescript
+rea.*tor
+```
+
+`*` heißt: das vorherige Element darf **0 oder beliebig oft** vorkommen.
+
+Mit `.*` heißt das:
+
+- &#x20;beliebig viele beliebige Zeichen&#x20;
+
+Matcht z. B.:
+
+- `reator`&#x20;
+
+- `reaktor`&#x20;
+
+- `rea123tor`&#x20;
+
+---
+
+## D. Plus `+`
+
+```typescript
+rea.+tor
+```
+
+`+` heißt: mindestens einmal
+
+Matcht:
+
+- `reaktor`&#x20;
+
+- `reaXYZtor`&#x20;
+
+Matcht nicht:
+
+- `reator`&#x20;
+
+---
+
+## E. Fragezeichen `?`
+
+```typescript
+reaktors?
+```
+
+Das `s` ist optional.
+
+Matcht:
+
+- `reaktor`&#x20;
+
+- `reaktors`&#x20;
+
+---
+
+## F. Gruppen `(...)`
+
+```typescript
+(reaktor|antrieb|kern)
+```
+
+Eine Gruppe mit Alternativen.
+
+Matcht:
+
+- `reaktor`&#x20;
+
+- `antrieb`&#x20;
+
+- `kern`&#x20;
+
+---
+
+## G. Alternative `|`
+
+```typescript
+kirk|john|sarvin
+```
+
+Matcht einen dieser Begriffe.
+
+---
+
+## H. Wortgrenzen `\b`
+
+```typescript
+\breaktor\b
+```
+
+Matcht `reaktor` als ganzes Wort.
+
+Matcht:
+
+- `der reaktor ist instabil`&#x20;
+
+Matcht nicht:
+
+- `superreaktor`&#x20;
+
+Das ist für deine Trigger **extrem nützlich**.
+
+---
+
+## I. Zeichengruppen `[...]`
+
+```typescript
+[abc]
+```
+
+Eines der Zeichen `a`, `b`, `c`
+
+Beispiel:
+
+```typescript
+reakto[rn]
+```
+
+Matcht:
+
+- `reaktor`&#x20;
+
+- `reakton`&#x20;
+
+---
+
+## J. Negierte Zeichengruppen `[^...]`
+
+```typescript
+[^ ]+
+```
+
+Matcht eine Folge von Zeichen, die kein Leerzeichen sind.
+
+---
+
+## K. Anfang und Ende
+
+```typescript
+^kirk
+```
+
+Matcht nur, wenn `kirk` am Anfang steht.
+
+```typescript
+reaktor$
+```
+
+Matcht nur, wenn `reaktor` am Ende steht.
+
+Für Trigger meist weniger wichtig, aber manchmal nützlich.
+
+---
+
+## 6.4 Die wichtigsten praktischen Muster für dein System
+
+## 1. Exakter Begriff als ganzes Wort
+
+```typescript
+\bArtefakt\b
+```
+
+## 2. Einer von mehreren Begriffen
+
+```typescript
+\b(Artefakt|Reaktor|Kern)\b
+```
+
+## 3. Singular/Plural
+
+```typescript
+\bReaktor(en)?\b
+```
+
+Matcht:
+
+- `Reaktor`&#x20;
+
+- `Reaktoren`&#x20;
+
+## 4. Optionaler Buchstabe
+
+```typescript
+\bReaktors?\b
+```
+
+Matcht:
+
+- `Reaktor`&#x20;
+
+- `Reaktors`&#x20;
+
+## 5. Zwei Begriffe in derselben Passage
+
+```typescript
+Kirk.*Reaktor
+```
+
+Matcht:
+
+- `Kirk geht zum Reaktor`&#x20;
+
+- `Kirk sieht den beschädigten Reaktor`&#x20;
+
+Achtung:\
+&#x20;Das ist relativ breit.
+
+## 6. Begriffe in beliebiger Reihenfolge
+
+Dafür braucht man meist zwei Varianten:
+
+```typescript
+(Kirk.*Reaktor|Reaktor.*Kirk)
+```
+
+## 7. UEE oder Senat oder Imperator
+
+```typescript
+\b(UEE|Senat|Imperator)\b
+```
+
+## 8. Technologie-Wortfamilie
+
+```typescript
+\b(Antrieb|Reaktor|Kern|Energieversorgung)\b
+```
+
+---
+
+## 6.5 Beispiele: Phrase vs. Regex
+
+## Beispiel A
+
+### Phrase
+
+```typescript
+reaktor
+```
+
+Gut, wenn du einfach nur `reaktor` suchst.
+
+### Regex
+
+```typescript
+\b(reaktor|antrieb|kern)\b
+```
+
+Gut, wenn eines von mehreren Technikbegriffen reichen soll.
+
+---
+
+## Beispiel B
+
+### Phrase
+
+```typescript
+artefakt
+```
+
+### Regex
+
+```typescript
+\bArtefakt(e|s)?\b
+```
+
+Gut, wenn du auch Beugungen abdecken willst.
+
+---
+
+## Beispiel C
+
+### Phrase
+
+```typescript
+Kirk
+```
+
+### Regex
+
+```typescript
+(Kirk.*Artefakt|Artefakt.*Kirk)
+```
+
+Gut, wenn beide Begriffe im Textzusammenhang vorkommen sollen.
+
+---
+
+## 6.6 Gute Regex-Beispiele für deinen Einsatz
+
+## Technik-Kontext
+
+```typescript
+\b(reaktor|antrieb|kern|energieversorgung)\b
+```
+
+## Politik-Kontext
+
+```typescript
+\b(senat|imperator|abstimmung|dekret)\b
+```
+
+## Artefakt-Kontext
+
+```typescript
+\b(artefakt|relikt|objekt)\b
+```
+
+## Person + Sache
+
+```typescript
+(Kirk.*Artefakt|Artefakt.*Kirk)
+```
+
+## Status / Schaden
+
+```typescript
+\b(instabil|beschädigt|ausgefallen|fehlerhaft)\b
+```
+
+---
+
+## 6.7 Schlechte oder riskante Regex-Beispiele
+
+## Zu breit
+
+```typescript
+.*reaktor.*
+```
+
+Warum schlecht:
+
+- &#x20;matcht fast alles, sobald `reaktor` irgendwo vorkommt&#x20;
+
+- &#x20;Wortgrenzen fehlen&#x20;
+
+- &#x20;unnötig unsauber&#x20;
+
+Besser:
+
+```typescript
+\breaktor\b
+```
+
+## Zu magisch
+
+```typescript
+[a-z]*tor
+```
+
+Warum schlecht:
+
+- &#x20;sehr unklar&#x20;
+
+- &#x20;matcht vielleicht zu viel&#x20;
+
+## Zu komplex für Alltagspflege
+
+```typescript
+\b((reaktor(en|s)?)|(antrieb(e|s)?))\b
+```
+
+Technisch okay, aber schlecht lesbar.\
+&#x20;Lieber einfacher halten.
+
+---
+
+## 6.8 Best Practices für Regex in deinem System
+
+## Regel 1
+
+Benutze **Phrase** als Standard.
+
+## Regel 2
+
+Benutze Regex nur, wenn du wirklich Varianten brauchst.
+
+## Regel 3
+
+Benutze möglichst oft Wortgrenzen:
+
+```typescript
+\b...\b
+```
+
+## Regel 4
+
+Halte Regex kurz und lesbar.
+
+## Regel 5
+
+Benutze Gruppen nur so komplex wie nötig.
+
+## Regel 6
+
+Teste neue Regex mit Beispieltexten.
+
+---
+
+## 6.9 Typische Fehler
+
+## Fehler 1: Wortgrenzen vergessen
+
+```typescript
+reaktor
+```
+
+Matcht auch innerhalb längerer Wörter.
+
+Besser:
+
+```typescript
+\breaktor\b
+```
+
+## Fehler 2: Zu breite Nutzung von `.*`
+
+```typescript
+Kirk.*Artefakt
+```
+
+Kann sehr viel matchen.
+
+Ist okay, aber bewusst einsetzen.
+
+## Fehler 3: Regex verwenden, wo Phrase reicht
+
+Wenn `reaktor` reicht, nimm lieber Phrase statt Regex.
+
+## Fehler 4: Falsche Escape-Erwartung
+
+In SQL-Strings und UI können Backslashes manchmal empfindlich sein.\
+&#x20;Der gespeicherte Wert muss wirklich das Regex-Muster enthalten, nicht eine kaputte Escape-Variante.
+
+---
+
+## 6.10 Empfehlungen für die UI-Beschriftung
+
+Für Nutzerfreundlichkeit würde ich in der UI ungefähr so helfen:
+
+### Text-Trigger
+
+„Einfacher Begriff oder Phrase“
+
+### Regex
+
+„Erweiterter Musterabgleich für Sonderfälle“
+
+### Hilfetext Regex
+
+„Beispiele: `\bArtefakt\b`, `Kirk.*Reaktor`, `\b(UEE|Senat)\b`“
+
+---
+
+## 6.11 Praktische Beispielbibliothek
+
+### Nur ein Wort
+
+```typescript
+\bKirk\b
+```
+
+### Mehrere gleichwertige Wörter
+
+```typescript
+\b(Kirk|John|Sarvin)\b
+```
+
+### Singular / Plural
+
+```typescript
+\bArtefakt(e)?\b
+```
+
+### Optionale Endung
+
+```typescript
+\bReaktors?\b
+```
+
+### Wortfamilie
+
+```typescript
+\b(instabil|beschädigt|ausgefallen)\b
+```
+
+### Kombination zweier Begriffe
+
+```typescript
+(Kirk.*Artefakt|Artefakt.*Kirk)
+```
+
+### Technikcluster
+
+```typescript
+\b(reaktor|antrieb|kern|energieversorgung)\b
+```
+
+### Politikcluster
+
+```typescript
+\b(senat|dekret|abstimmung|imperator)\b
+```
+
+### Militärischer Kontext
+
+```typescript
+\b(flotte|kommando|militär|einsatz)\b
+```
+
+### Warnsignal / Gefahr
+
+```typescript
+\b(fehlfunktion|störung|alarm|instabil)\b
+```
+

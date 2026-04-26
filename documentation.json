@@ -338,6 +338,10 @@
                         "group": "Codex-Context-Erstellung für Beats",
                         "pages": [
                           {
+                            "title": "Regex_Ausdrücke für Hyper-Codex",
+                            "path": "regex-ausdrcke-fr-hyper-codex"
+                          },
+                          {
                             "title": "Beschreibung",
                             "path": "beschreibung"
                           },

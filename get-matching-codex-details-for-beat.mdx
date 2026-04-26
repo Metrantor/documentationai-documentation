@@ -1,61 +1,151 @@
 ---
 title: get_matching_codex_details_for_beat
 ---
-## `public.get_matching_codex_details_for_beat(p_codex_entry_ids uuid[], p_beat_id uuid)`
+# `public.get_matching_codex_details_for_beat(...)`
 
-### Zweck
+## Zweck
 
-Ermittelt die **gültigen Detail-Einträge** für einen oder mehrere Codex-Haupteinträge im Kontext eines Beats.
+Ermittelt alle **gültigen Codex-Detail-Einträge** für eine Menge von Haupteinträgen im Kontext eines Beats.
 
-### Was die Funktion fachlich macht
+Diese Funktion ist jetzt die zentrale Stelle für:
 
-- lädt Beat-Kontext
+- Datumsprüfung auf Haupteintrags-Ebene
 
-- berücksichtigt Exclusions
+- Datumsprüfung auf Detail-Ebene
 
-- baut einen rekursiven Relation Tree
+- Exclusions
 
-- lädt Story-State
+- rekursive Relationen
 
-- filtert `codex_conditional_entries`
+- POV
 
-- wertet Bedingungen aus
+- Variablenbedingungen
 
-- berücksichtigt:
+- Text-Trigger / Regex-Trigger
 
-  - `condition_mode = all`
+## Signatur
 
-  - `condition_mode = any`
+```typescript
+public.get_matching_codex_details_for_beat(
+  p_codex_entry_ids uuid[],
+  p_beat_id uuid
+)
+returns table(...)
+```
 
-  - `requires_pov_character_id`
+## Parameter
 
-  - `valid_from`
+| Parameter           | Typ      | Bedeutung                                        |
+| ------------------- | -------- | ------------------------------------------------ |
+| `p_codex_entry_ids` | `uuid[]` | Startmenge von Haupteinträgen                    |
+| `p_beat_id`         | `uuid`   | Beat-Kontext für Zeit, POV, Text und Story-State |
 
-  - `valid_to`
+## Rückgabe
 
-### Aufrufparameter
+Die Funktion liefert eine Tabellenmenge mit:
 
-| Parameter           | Typ      | Bedeutung                      |
-| ------------------- | -------- | ------------------------------ |
-| `p_codex_entry_ids` | `uuid[]` | Startmenge von Codex-Einträgen |
-| `p_beat_id`         | `uuid`   | Beat-Kontext                   |
+| Feld                        | Typ           | Bedeutung                |
+| --------------------------- | ------------- | ------------------------ |
+| `conditional_entry_id`      | `uuid`        | ID des Detail-Eintrags   |
+| `codex_entry_id`            | `uuid`        | zugehöriger Haupteintrag |
+| `title`                     | `text`        | Titel des Details        |
+| `codex_text`                | `text`        | eigentlicher Detailtext  |
+| `note`                      | `text`        | optionale Notiz          |
+| `sort_order`                | `integer`     | Sortierung               |
+| `condition_mode`            | `text`        | `all` oder `any`         |
+| `requires_pov_character_id` | `uuid`        | optionaler POV-Filter    |
+| `valid_from`                | `timestamptz` | gültig ab                |
+| `valid_to`                  | `timestamptz` | gültig bis               |
 
-### Rückgabewert
+## Wie die Funktion arbeitet
 
-| Feld                        | Typ           |
-| --------------------------- | ------------- |
-| `conditional_entry_id`      | `uuid`        |
-| `codex_entry_id`            | `uuid`        |
-| `title`                     | `text`        |
-| `codex_text`                | `text`        |
-| `note`                      | `text`        |
-| `sort_order`                | `integer`     |
-| `condition_mode`            | `text`        |
-| `requires_pov_character_id` | `uuid`        |
-| `valid_from`                | `timestamptz` |
-| `valid_to`                  | `timestamptz` |
+### Schritt 1: Beat-Kontext laden
 
-### Beispiel
+Sie lädt aus dem Beat:
+
+- &#x20;Serie&#x20;
+
+- &#x20;POV&#x20;
+
+- `effective_at`&#x20;
+
+- &#x20;normalisierten Beat-Text&#x20;
+
+### Schritt 2: Seed-Haupteinträge filtern
+
+Aus den übergebenen IDs bleiben nur solche übrig, die:
+
+- `is_active = true`&#x20;
+
+- &#x20;zeitlich gültig sind:&#x20;
+
+  - `valid_from` leer oder \<= `effective_at`&#x20;
+
+  - `valid_to` leer oder >= `effective_at`&#x20;
+
+### Schritt 3: Seed-Exclusions anwenden
+
+Wenn eine Exclusion-Phrase des Haupteintrags im Beat-Text vorkommt, fliegt der Eintrag raus.
+
+### Schritt 4: Rekursive Relationen verfolgen
+
+Es werden relationell verknüpfte Haupteinträge gezogen, aber nur wenn sie:
+
+- &#x20;aktive Relation haben&#x20;
+
+- `pull_into_context = true`&#x20;
+
+- &#x20;selbst aktiv sind&#x20;
+
+- &#x20;zeitlich gültig sind&#x20;
+
+- &#x20;nicht durch Exclusion gesperrt werden&#x20;
+
+### Schritt 5: Candidate-Details laden
+
+Für die so entstandenen Haupteinträge werden passende `codex_conditional_entries` geladen, wenn:
+
+- &#x20;der Detail-Eintrag aktiv ist&#x20;
+
+- &#x20;der POV passt&#x20;
+
+- &#x20;das Detail-Datum passt&#x20;
+
+### Schritt 6: Variablenbedingungen prüfen
+
+Über `evaluate_story_variable_condition(...)`.
+
+### Schritt 7: Text-Trigger prüfen
+
+Pro Detail wird geprüft:
+
+- &#x20;wie viele aktive Trigger existieren&#x20;
+
+- &#x20;wie viele davon matchen&#x20;
+
+`phrase`:
+
+- `like '%...%'`&#x20;
+
+`regex`:
+
+- `~*`&#x20;
+
+### Schritt 8: Endgültige Filterung
+
+Ein Detail ist gültig, wenn:
+
+- &#x20;keine Bedingungen existieren\
+  &#x20;oder die Bedingungen erfüllt sind&#x20;
+
+- &#x20;und:&#x20;
+
+  - &#x20;keine aktiven Trigger existieren\
+    &#x20;oder mindestens ein Trigger matcht&#x20;
+
+## Aufrufvarianten
+
+### Direkt aufrufen
 
 ```typescript
 select *
@@ -63,11 +153,43 @@ from public.get_matching_codex_details_for_beat(
   array[
     '11111111-1111-1111-1111-111111111111'::uuid
   ],
-  'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'::uuid
+  '18f58f5a-a454-4cdc-8a60-7eec80c1b007'::uuid
 );
 ```
 
-# SQL
+### Mit mehreren Haupteinträgen
+
+```typescript
+select *
+from public.get_matching_codex_details_for_beat(
+  array[
+    '11111111-1111-1111-1111-111111111111'::uuid,
+    '22222222-2222-2222-2222-222222222222'::uuid
+  ],
+  '18f58f5a-a454-4cdc-8a60-7eec80c1b007'::uuid
+);
+```
+
+## Beispielergebnis als JSON
+
+```typescript
+[
+  {
+    "conditional_entry_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+    "codex_entry_id": "11111111-1111-1111-1111-111111111111",
+    "title": "Reaktorzustand",
+    "codex_text": "Der Reaktor zeigt instabile Ausschläge.",
+    "note": "Nur bei Technikbezug zeigen",
+    "sort_order": 10,
+    "condition_mode": "all",
+    "requires_pov_character_id": null,
+    "valid_from": null,
+    "valid_to": null
+  }
+]
+```
+
+## `CREATE OR REPLACE FUNCTION`
 
 ```typescript
 create or replace function public.get_matching_codex_details_for_beat(
@@ -108,14 +230,23 @@ with target as (
   where b.id = p_beat_id
 ),
 input_ids as (
-  select distinct unnest(p_codex_entry_ids) as codex_entry_id
+  select distinct unnest(coalesce(p_codex_entry_ids, '{}'::uuid[])) as codex_entry_id
 ),
 seed_entries as (
   select ce.id as codex_entry_id
   from input_ids i
   join public.codex_entries ce
     on ce.id = i.codex_entry_id
+  join target t
+    on true
   where ce.is_active = true
+    and (
+      t.effective_at is null
+      or (
+        (ce.valid_from is null or ce.valid_from <= t.effective_at)
+        and (ce.valid_to is null or ce.valid_to >= t.effective_at)
+      )
+    )
 ),
 seed_excluded as (
   select distinct se.codex_entry_id
@@ -145,17 +276,32 @@ relation_tree as (
 
     select
       rel.root_entry_id,
-      r.target_entry_id as codex_entry_id,
-      rel.path || r.target_entry_id
+      cr.target_entry_id as codex_entry_id,
+      rel.path || cr.target_entry_id
     from rel
-    join public.codex_relations r
-      on r.source_entry_id = rel.codex_entry_id
-     and r.is_active = true
-     and r.pull_into_context = true
+    join public.codex_relations cr
+      on cr.source_entry_id = rel.codex_entry_id
+     and cr.is_active = true
+     and cr.pull_into_context = true
     join public.codex_entries ce
-      on ce.id = r.target_entry_id
+      on ce.id = cr.target_entry_id
      and ce.is_active = true
-    where not (r.target_entry_id = any(rel.path))
+    join target t
+      on true
+    where not (cr.target_entry_id = any(rel.path))
+      and (
+        t.effective_at is null
+        or (
+          (ce.valid_from is null or ce.valid_from <= t.effective_at)
+          and (ce.valid_to is null or ce.valid_to >= t.effective_at)
+        )
+      )
+      and not exists (
+        select 1
+        from public.codex_exclusions ex
+        where ex.entry_id = cr.target_entry_id
+          and t.beat_text_normalized like '%' || coalesce(ex.normalized_excluded_phrase, lower(ex.excluded_phrase)) || '%'
+      )
   )
   select distinct
     rel.root_entry_id,
@@ -165,41 +311,6 @@ relation_tree as (
 candidate_codex_ids as (
   select distinct codex_entry_id
   from relation_tree
-),
-candidate_excluded_roots as (
-  select distinct cci.codex_entry_id
-  from candidate_codex_ids cci
-  join public.codex_exclusions ex
-    on ex.entry_id = cci.codex_entry_id
-  join target t
-    on true
-  where t.beat_text_normalized like '%' || coalesce(ex.normalized_excluded_phrase, lower(ex.excluded_phrase)) || '%'
-),
-excluded_relation_tree as (
-  with recursive exrel as (
-    select
-      cer.codex_entry_id
-    from candidate_excluded_roots cer
-
-    union
-
-    select
-      r.target_entry_id
-    from exrel
-    join public.codex_relations r
-      on r.source_entry_id = exrel.codex_entry_id
-     and r.is_active = true
-     and r.pull_into_context = true
-  )
-  select distinct codex_entry_id
-  from exrel
-),
-final_codex_ids as (
-  select cci.codex_entry_id
-  from candidate_codex_ids cci
-  left join excluded_relation_tree ert
-    on ert.codex_entry_id = cci.codex_entry_id
-  where ert.codex_entry_id is null
 ),
 current_story_state as (
   select
@@ -223,7 +334,7 @@ candidate_entries as (
     cce.valid_to,
     cce.series_id
   from public.codex_conditional_entries cce
-  join final_codex_ids fci
+  join candidate_codex_ids fci
     on fci.codex_entry_id = cce.codex_entry_id
   join public.codex_entries ce
     on ce.id = cce.codex_entry_id
@@ -287,21 +398,59 @@ condition_summary as (
   from conditions_joined cj
   group by cj.conditional_entry_id
 ),
+text_trigger_matches as (
+  select
+    ce.id as conditional_entry_id,
+    count(tt.id) as total_triggers,
+    count(*) filter (
+      where tt.match_mode = 'phrase'
+        and t.beat_text_normalized like '%' || lower(tt.trigger_value) || '%'
+    ) as matching_phrase_triggers,
+    count(*) filter (
+      where tt.match_mode = 'regex'
+        and t.beat_text_normalized ~* tt.trigger_value
+    ) as matching_regex_triggers
+  from candidate_entries ce
+  join target t
+    on true
+  left join public.codex_conditional_entry_text_triggers tt
+    on tt.conditional_entry_id = ce.id
+   and tt.is_active = true
+  group by ce.id
+),
+text_trigger_summary as (
+  select
+    tm.conditional_entry_id,
+    coalesce(tm.total_triggers, 0) as total_triggers,
+    (
+      coalesce(tm.matching_phrase_triggers, 0)
+      + coalesce(tm.matching_regex_triggers, 0)
+    ) as matching_triggers
+  from text_trigger_matches tm
+),
 valid_entries as (
   select
     ce.*
   from candidate_entries ce
   left join condition_summary cs
     on cs.conditional_entry_id = ce.id
+  left join text_trigger_summary ts
+    on ts.conditional_entry_id = ce.id
   where
-    coalesce(cs.total_conditions, 0) = 0
-    or (
-      coalesce(cs.condition_mode, 'all') = 'all'
-      and cs.all_conditions_match = true
+    (
+      coalesce(cs.total_conditions, 0) = 0
+      or (
+        coalesce(cs.condition_mode, 'all') = 'all'
+        and cs.all_conditions_match = true
+      )
+      or (
+        coalesce(cs.condition_mode, 'all') = 'any'
+        and cs.any_condition_match = true
+      )
     )
-    or (
-      coalesce(cs.condition_mode, 'all') = 'any'
-      and cs.any_condition_match = true
+    and (
+      coalesce(ts.total_triggers, 0) = 0
+      or coalesce(ts.matching_triggers, 0) > 0
     )
 )
 select
@@ -319,4 +468,18 @@ from valid_entries ve
 order by ve.codex_entry_id, ve.sort_order, ve.title;
 $function$;
 ```
+
+## Limitierungen und kritische Punkte
+
+- `phrase` ist einfacher Teilstring-Match, keine Wortgrenzen.&#x20;
+
+- &#x20;Regex kann stark sein, aber auch zu breit oder zu eng matchen.&#x20;
+
+- &#x20;Die Funktion kann bei vielen Relationen + vielen Bedingungen + vielen Triggern schwerer werden.&#x20;
+
+- &#x20;Ein ungültiger Regex kann Laufzeitfehler auslösen.&#x20;
+
+- &#x20;Exclusions greifen auf Haupteintrags-Ebene, nicht als feinere Trigger-Logik.&#x20;
+
+- &#x20;Aktuell gibt es keine Gruppenlogik wie „alle Trigger müssen matchen“.
 
