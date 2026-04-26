@@ -1,0 +1,257 @@
+---
+title: extract_prompt_value_text
+---
+# `public.extract_prompt_value_text(p_json jsonb)`
+
+## Zweck
+
+Diese Hilfsfunktion extrahiert aus einem `jsonb`-Wert einen **einfach verwendbaren Textwert**.
+
+Sie wird genutzt, um Werte aus Prompt-Feldern und Assignment-Werten in eine einheitliche Textform zu bringen, damit sie später z. B. als `parameter.xyz` in n8n oder im Prompt-Rendering eingesetzt werden können.
+
+Die Funktion ist besonders dafür gedacht, unterschiedliche JSON-Formen robust zu behandeln, etwa:
+
+- `{"value":"63"}`
+
+- `"AUR"`
+
+- `true`
+
+- `123`
+
+- `{}`
+
+---
+
+## Erklärung
+
+In den Prompt-Zuweisungen und Default-Feldern liegen Werte nicht immer in exakt derselben Struktur.
+
+Typische Fälle sind:
+
+- Objekt mit `value`
+
+- direkter String
+
+- direkte Zahl
+
+- direkter Boolean
+
+- leeres Objekt
+
+Diese Funktion vereinheitlicht das Verhalten.
+
+### Verhalten im Detail
+
+- Wenn `p_json` ein Objekt mit Schlüssel `value` ist, wird dieser Wert extrahiert
+
+- Wenn `p_json` direkt ein String, eine Zahl oder ein Boolean ist, wird dieser Wert als Text zurückgegeben
+
+- Wenn `p_json` leer oder `null` ist, wird `null` zurückgegeben
+
+- Komplexere Inhalte werden notfalls als Text serialisiert
+
+Damit ist die Funktion ideal als Zwischenschritt geeignet, um aus `default_value_json` oder `value_json` einen direkt nutzbaren Feldwert zu gewinnen.
+
+---
+
+## Signatur
+
+```typescript
+public.extract_prompt_value_text(p_json jsonb) returns text
+```
+
+---
+
+## Parameter
+
+### `p_json`
+
+**Typ:** `jsonb`
+
+Der zu interpretierende JSON-Wert.
+
+Beispiele:
+
+- `{"value":"63"}`&#x20;
+
+- `"hello"`&#x20;
+
+- `true`&#x20;
+
+- `12`&#x20;
+
+- `{}`&#x20;
+
+- `null`&#x20;
+
+---
+
+## Aufrufbeispiele
+
+### Beispiel 1: Objekt mit `value`
+
+```typescript
+select public.extract_prompt_value_text('{"value":"63"}'::jsonb);
+```
+
+### Beispiel 2: Direkter String
+
+```typescript
+select public.extract_prompt_value_text('"AUR"'::jsonb);
+```
+
+### Beispiel 3: Direkter Boolean
+
+```typescript
+select public.extract_prompt_value_text('true'::jsonb);
+```
+
+### Beispiel 4: Direkte Zahl
+
+```typescript
+select public.extract_prompt_value_text('123'::jsonb);
+```
+
+### Beispiel 5: Leeres Objekt
+
+```typescript
+select public.extract_prompt_value_text('{}'::jsonb);
+```
+
+---
+
+## Rückgabebeispiele
+
+### Input
+
+```typescript
+{"value":"63"}
+```
+
+### Rückgabe
+
+```typescript
+63
+```
+
+---
+
+### Input
+
+```typescript
+"AUR"
+```
+
+### Rückgabe
+
+```typescript
+AUR
+```
+
+---
+
+### Input
+
+```typescript
+true
+```
+
+### Rückgabe
+
+```typescript
+true
+```
+
+---
+
+### Input
+
+```typescript
+123
+```
+
+### Rückgabe
+
+```typescript
+123
+```
+
+---
+
+### Input
+
+```typescript
+{}
+```
+
+### Rückgabe
+
+```typescript
+null
+```
+
+---
+
+## Typischer Einsatz
+
+Die Funktion wird typischerweise in SQL-Ausdrücken wie diesem verwendet:
+
+```typescript
+public.extract_prompt_value_text(
+  coalesce(bpav.value_json, plf.default_value_json)
+)
+```
+
+Damit gilt:
+
+- &#x20;wenn ein expliziter Assignment-Wert vorhanden ist, wird dieser genutzt&#x20;
+
+- &#x20;sonst wird auf den Default-Wert des Prompt-Feldes zurückgegriffen&#x20;
+
+- &#x20;am Ende entsteht ein einheitlicher Textwert
+
+# SQL
+
+```typescript
+create or replace function public.extract_prompt_value_text(p_json jsonb)
+returns text
+language plpgsql
+immutable
+as $$
+declare
+  v_type text;
+begin
+  if p_json is null then
+    return null;
+  end if;
+
+  v_type := jsonb_typeof(p_json);
+
+  if v_type = 'object' then
+    if p_json ? 'value' then
+      if jsonb_typeof(p_json->'value') = 'string' then
+        return p_json->>'value';
+      elsif jsonb_typeof(p_json->'value') in ('number', 'boolean') then
+        return p_json->>'value';
+      elsif jsonb_typeof(p_json->'value') = 'null' then
+        return null;
+      else
+        return p_json->'value'::text;
+      end if;
+    end if;
+
+    return null;
+  elsif v_type = 'string' then
+    return p_json #>> '{}';
+  elsif v_type in ('number', 'boolean') then
+    return p_json #>> '{}';
+  elsif v_type = 'null' then
+    return null;
+  else
+    return p_json::text;
+  end if;
+end;
+$$;
+```
+

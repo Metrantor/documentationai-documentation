@@ -1,0 +1,338 @@
+---
+title: get_codex_description_by_id
+---
+## `public.get_codex_description_by_id(p_id text)`
+
+### Zweck
+
+Die Funktion gibt den Inhalt des Feldes `description` aus der Tabelle `public.codex_entries` zurück.
+
+Sie wird verwendet, wenn zu einem Codex-Eintrag anhand seiner ID der Beschreibungstext benötigt wird, z. B. für Prompt-Bausteine wie POV-Stil, Figurenbeschreibung oder sonstigen Codex-Kontext.
+
+Die Funktion ist tolerant gegenüber leeren oder ungültigen IDs und gibt in diesen Fällen einen leeren String zurück.
+
+---
+
+## Signatur
+
+```typescript
+public.get_codex_description_by_id(
+  p_id text
+)
+returns text
+```
+
+---
+
+## Eingabeparameter
+
+| Parameter | Typ    | Bedeutung                                                                                                                 |
+| --------- | ------ | ------------------------------------------------------------------------------------------------------------------------- |
+| `p_id`    | `text` | Die ID des Codex-Eintrags als Text. Erwartet wird normalerweise eine UUID. Der Wert darf aber auch `null` oder leer sein. |
+
+---
+
+## Rückgabewert
+
+| Rückgabe | Bedeutung                                                                                                     |
+| -------- | ------------------------------------------------------------------------------------------------------------- |
+| `text`   | Inhalt aus `codex_entries.description`                                                                        |
+| `''`     | Leerer String, wenn keine gültige ID übergeben wurde, kein Eintrag gefunden wurde oder `description` leer ist |
+
+---
+
+## Verhalten im Detail
+
+Die Funktion arbeitet in vier Schritten:
+
+### 1. Prüfung auf leeren Wert
+
+Wenn `p_id` `null` ist oder nur aus Leerzeichen besteht, gibt die Funktion sofort einen leeren String zurück.
+
+```typescript
+select public.get_codex_description_by_id(null);
+select public.get_codex_description_by_id('');
+select public.get_codex_description_by_id('   ');
+```
+
+Ergebnis:
+
+```typescript
+''
+```
+
+---
+
+### 2. Umwandlung in UUID
+
+Da die eigentliche Spalte `codex_entries.id` vom Typ `uuid` ist, versucht die Funktion, den Textparameter nach `uuid` umzuwandeln.
+
+```typescript
+v_id := trim(p_id)::uuid;
+```
+
+Der Vorteil: Die Funktion kann problemlos aus n8n, Supabase RPC oder JSON-Kontexten aufgerufen werden, bei denen IDs häufig als Text übergeben werden.
+
+---
+
+### 3. Fehlerbehandlung bei ungültiger UUID
+
+Wenn `p_id` kein gültiges UUID-Format hat, bricht die Funktion nicht mit einem Fehler ab, sondern gibt einen leeren String zurück.
+
+Beispiel:
+
+```typescript
+select public.get_codex_description_by_id('abc');
+```
+
+Ergebnis:
+
+```typescript
+''
+```
+
+---
+
+### 4. Lesen der Beschreibung
+
+Wenn eine gültige UUID übergeben wurde, sucht die Funktion den passenden Eintrag in `public.codex_entries`.
+
+```typescript
+select ce.description
+from public.codex_entries ce
+where ce.id = v_id
+limit 1;
+```
+
+Falls der Eintrag gefunden wird, wird `description` zurückgegeben. Falls der Eintrag nicht existiert oder `description` `null` ist, wird ebenfalls ein leerer String zurückgegeben.
+
+# SQL
+
+```typescript
+create or replace function public.get_codex_description_by_id(
+  p_id text
+)
+returns text
+language plpgsql
+stable
+as $$
+declare
+  v_id uuid;
+  v_description text;
+begin
+  -- Wenn p_id null oder leer ist, gib leeren String zurück
+  if p_id is null or trim(p_id) = '' then
+    return '';
+  end if;
+
+  -- Text sicher in UUID umwandeln
+  begin
+    v_id := trim(p_id)::uuid;
+  exception
+    when invalid_text_representation then
+      return '';
+  end;
+
+  select ce.description
+  into v_description
+  from public.codex_entries ce
+  where ce.id = v_id
+  limit 1;
+
+  return coalesce(v_description, '');
+end;
+$$;
+```
+
+## Beispielaufrufe
+
+### Gültige ID
+
+```typescript
+select public.get_codex_description_by_id(
+  '0b2479ee-95bd-458d-8933-62b6e8027f13'
+);
+```
+
+Mögliches Ergebnis:
+
+```typescript
+Die Erzählung steht in der dritten Person, bleibt aber eng an eine bestimmte POV-Figur gebunden...
+```
+
+---
+
+### Leerer String
+
+```typescript
+select public.get_codex_description_by_id('');
+```
+
+Ergebnis:
+
+```typescript
+''
+```
+
+---
+
+### NULL
+
+```typescript
+select public.get_codex_description_by_id(null);
+```
+
+Ergebnis:
+
+```typescript
+''
+```
+
+---
+
+### Ungültige UUID
+
+```typescript
+select public.get_codex_description_by_id('keine-gueltige-id');
+```
+
+Ergebnis:
+
+```typescript
+''
+```
+
+---
+
+### Gültige UUID, aber kein Treffer
+
+```typescript
+select public.get_codex_description_by_id(
+  '11111111-1111-1111-1111-111111111111'
+);
+```
+
+Ergebnis:
+
+```typescript
+''
+```
+
+---
+
+## Aufruf aus Supabase RPC
+
+Endpoint sinngemäß:
+
+```typescript
+/rest/v1/rpc/get_codex_description_by_id
+```
+
+Request Body:
+
+```typescript
+{
+  "p_id": "0b2479ee-95bd-458d-8933-62b6e8027f13"
+}
+```
+
+Antwort:
+
+```typescript
+"Beschreibungstext des Codex-Eintrags"
+```
+
+Bei leerem Wert:
+
+```typescript
+{
+  "p_id": ""
+}
+```
+
+Antwort:
+
+```typescript
+""
+```
+
+---
+
+## Nutzung in n8n
+
+Im Supabase- oder HTTP-Request-Node kannst du die Funktion per RPC aufrufen und die ID dynamisch übergeben.
+
+Beispiel-Body:
+
+```typescript
+{
+  "p_id": "{{ $json.pov_style_entry_id }}"
+}
+```
+
+Oder für eine Kapitel-POV-Figur:
+
+```typescript
+{
+  "p_id": "{{ $json.pov_character_entry_id }}"
+}
+```
+
+Wenn der Wert leer, `null` oder ungültig ist, erhältst du trotzdem einen sauberen Rückgabewert:
+
+```typescript
+''
+```
+
+Das verhindert Fehler wie:
+
+```typescript
+invalid input syntax for type uuid: ""
+```
+
+---
+
+## Typischer Einsatz im Prompt-Workflow
+
+Beispiel für POV-Stil:
+
+```typescript
+<pov_style>
+{{pov_style_description}}
+</pov_style>
+```
+
+Beispiel für POV-Figur:
+
+```typescript
+<pov_character>
+{{pov_character_description}}
+</pov_character>
+```
+
+Die Funktion kann also genutzt werden, um Beschreibungstexte aus beliebigen Codex-Einträgen zu holen, solange deren ID bekannt ist.
+
+---
+
+## Wichtige Hinweise
+
+Die Funktion prüft aktuell **nicht**, ob der Codex-Eintrag aktiv ist.
+
+Das bedeutet: Auch Einträge mit
+
+```typescript
+is_active = false
+```
+
+würden gefunden werden, wenn ihre ID direkt übergeben wird.
+
+Falls du nur aktive Einträge zulassen willst, sollte die Abfrage erweitert werden:
+
+```typescript
+where ce.id = v_id
+  and ce.is_active = true
+```
+
+Ebenso prüft die Funktion aktuell nicht auf `series_id` oder `entry_type`. Sie holt einfach die Beschreibung zu genau dieser ID.
+
+Für POV-Stile oder POV-Figuren kann das in Ordnung sein, weil die Auswahl bereits vorher im UI gefiltert wird.

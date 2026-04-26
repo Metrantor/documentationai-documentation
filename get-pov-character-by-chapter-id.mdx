@@ -1,0 +1,579 @@
+---
+title: get_pov_character_by_chapter_id
+---
+## `public.get_pov_character_by_chapter_id(p_chapter_id text)`
+
+### Zweck
+
+Die Funktion gibt die **POV-Figur eines Kapitels** als JSON-Objekt zurück.
+
+Sie nimmt eine `chapter_id` entgegen, liest aus der Tabelle `public.chapters` den Wert aus `pov_character_entry_id` und holt dazu aus `public.codex_entries` den Namen und die Beschreibung der verknüpften Figur.
+
+Der Ablauf ist:
+
+```typescript
+chapter_id
+→ chapters.pov_character_entry_id
+→ codex_entries.id
+→ name + description
+```
+
+Die Funktion ist robust gegenüber leeren, ungültigen oder nicht vorhandenen IDs. In diesen Fällen gibt sie ein leeres Standardobjekt zurück.
+
+---
+
+## Signatur
+
+```typescript
+public.get_pov_character_by_chapter_id(
+  p_chapter_id text
+)
+returns jsonb
+```
+
+---
+
+## Eingabeparameter
+
+| Parameter      | Typ    | Bedeutung                                                                                                                     |
+| -------------- | ------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| `p_chapter_id` | `text` | Die ID des Kapitels als Text. Erwartet wird normalerweise eine UUID. Der Wert darf aber auch `null`, leer oder ungültig sein. |
+
+---
+
+## Rückgabewert
+
+Die Funktion gibt immer ein JSONB-Objekt mit dieser Struktur zurück:
+
+```typescript
+{
+  "id": null,
+  "name": "",
+  "description": ""
+}
+```
+
+Oder, wenn eine aktive POV-Figur gefunden wird:
+
+```typescript
+{
+  "id": "0b2479ee-95bd-458d-8933-62b6e8027f13",
+  "name": "Kirk Washington",
+  "description": "Beschreibung der Figur aus dem Codex..."
+}
+```
+
+---
+
+## Rückgabefelder
+
+| Feld          | Typ                | Bedeutung                                                  |
+| ------------- | ------------------ | ---------------------------------------------------------- |
+| `id`          | `uuid` oder `null` | ID des Codex-Eintrags der POV-Figur                        |
+| `name`        | `text`             | Name der POV-Figur aus `codex_entries.name`                |
+| `description` | `text`             | Beschreibung der POV-Figur aus `codex_entries.description` |
+
+---
+
+## Verhalten im Detail
+
+### 1. Prüfung auf leere Kapitel-ID
+
+Wenn `p_chapter_id` `null`, leer oder nur aus Leerzeichen besteht, gibt die Funktion sofort ein leeres Standardobjekt zurück.
+
+```typescript
+select public.get_pov_character_by_chapter_id(null);
+select public.get_pov_character_by_chapter_id('');
+select public.get_pov_character_by_chapter_id('   ');
+```
+
+Ergebnis:
+
+```typescript
+{
+  "id": null,
+  "name": "",
+  "description": ""
+}
+```
+
+---
+
+### 2. Sichere Umwandlung in UUID
+
+Da `chapters.id` vom Typ `uuid` ist, versucht die Funktion, den Textparameter in eine UUID umzuwandeln:
+
+```typescript
+v_chapter_id := trim(p_chapter_id)::uuid;
+```
+
+Das ist nützlich für Aufrufe aus n8n, Supabase RPC oder JSON-Workflows, weil IDs dort häufig als Text übergeben werden.
+
+---
+
+### 3. Fehlerbehandlung bei ungültiger UUID
+
+Wenn `p_chapter_id` kein gültiges UUID-Format hat, bricht die Funktion nicht ab. Stattdessen gibt sie ebenfalls das leere Standardobjekt zurück.
+
+Beispiel:
+
+```typescript
+select public.get_pov_character_by_chapter_id('keine-gueltige-uuid');
+```
+
+Ergebnis:
+
+```typescript
+{
+  "id": null,
+  "name": "",
+  "description": ""
+}
+```
+
+---
+
+### 4. Lesen der POV-Figur aus dem Kapitel
+
+Die Funktion sucht das Kapitel in `public.chapters` und folgt dem Verweis:
+
+```typescript
+chapters.pov_character_entry_id
+```
+
+auf:
+
+```typescript
+codex_entries.id
+```
+
+Die Join-Logik lautet:
+
+```typescript
+from public.chapters ch
+left join public.codex_entries ce
+  on ce.id = ch.pov_character_entry_id
+ and ce.is_active = true
+where ch.id = v_chapter_id
+```
+
+Wichtig: Es werden nur Codex-Einträge berücksichtigt, bei denen gilt:
+
+```typescript
+ce.is_active = true
+```
+
+Ist der verknüpfte Codex-Eintrag deaktiviert, wird er nicht als gültige POV-Figur zurückgegeben.
+
+---
+
+### 5. Aufbau des JSON-Ergebnisses
+
+Wenn eine aktive POV-Figur gefunden wird, baut die Funktion dieses JSONB-Objekt:
+
+```typescript
+jsonb_build_object(
+  'id', ce.id,
+  'name', coalesce(ce.name, ''),
+  'description', coalesce(ce.description, '')
+)
+```
+
+Falls `name` oder `description` `null` wären, werden sie durch leere Strings ersetzt.
+
+---
+
+### 6. Fallback bei keinem Ergebnis
+
+Wenn kein Kapitel gefunden wird, keine POV-Figur gesetzt ist oder der Codex-Eintrag nicht aktiv ist, gibt die Funktion das Standardobjekt zurück:
+
+```typescript
+{
+  "id": null,
+  "name": "",
+  "description": ""
+}
+```
+
+---
+
+## SQL
+
+```typescript
+create or replace function public.get_pov_character_by_chapter_id(
+  p_chapter_id text
+)
+returns jsonb
+language plpgsql
+stable
+as $$
+declare
+  v_chapter_id uuid;
+  v_result jsonb;
+begin
+  if p_chapter_id is null or trim(p_chapter_id) = '' then
+    return jsonb_build_object(
+      'id', null,
+      'name', '',
+      'description', ''
+    );
+  end if;
+
+  begin
+    v_chapter_id := trim(p_chapter_id)::uuid;
+  exception
+    when invalid_text_representation then
+      return jsonb_build_object(
+        'id', null,
+        'name', '',
+        'description', ''
+      );
+  end;
+
+  select jsonb_build_object(
+    'id', ce.id,
+    'name', coalesce(ce.name, ''),
+    'description', coalesce(ce.description, '')
+  )
+  into v_result
+  from public.chapters ch
+  left join public.codex_entries ce
+    on ce.id = ch.pov_character_entry_id
+   and ce.is_active = true
+  where ch.id = v_chapter_id
+  limit 1;
+
+  return coalesce(
+    v_result,
+    jsonb_build_object(
+      'id', null,
+      'name', '',
+      'description', ''
+    )
+  );
+end;
+$$;
+```
+
+---
+
+## Beispielaufrufe
+
+### Gültige Kapitel-ID mit gesetzter POV-Figur
+
+```typescript
+select public.get_pov_character_by_chapter_id(
+  'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
+);
+```
+
+Mögliches Ergebnis:
+
+```typescript
+{
+  "id": "0b2479ee-95bd-458d-8933-62b6e8027f13",
+  "name": "Kirk Washington",
+  "description": "Kirk Washington ist ein junger, impulsiver Rekrut..."
+}
+```
+
+---
+
+### Gültige Kapitel-ID, aber keine POV-Figur gesetzt
+
+Wenn in `chapters.pov_character_entry_id` kein Wert steht:
+
+```typescript
+select public.get_pov_character_by_chapter_id(
+  'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
+);
+```
+
+Ergebnis:
+
+```typescript
+{
+  "id": null,
+  "name": "",
+  "description": ""
+}
+```
+
+---
+
+### Gültige Kapitel-ID, aber POV-Codex-Eintrag ist deaktiviert
+
+Wenn der verknüpfte Codex-Eintrag `is_active = false` hat:
+
+```typescript
+{
+  "id": null,
+  "name": "",
+  "description": ""
+}
+```
+
+Der Grund ist diese Bedingung:
+
+```typescript
+and ce.is_active = true
+```
+
+---
+
+### Leerer String
+
+```typescript
+select public.get_pov_character_by_chapter_id('');
+```
+
+Ergebnis:
+
+```typescript
+{
+  "id": null,
+  "name": "",
+  "description": ""
+}
+```
+
+---
+
+### NULL
+
+```typescript
+select public.get_pov_character_by_chapter_id(null);
+```
+
+Ergebnis:
+
+```typescript
+{
+  "id": null,
+  "name": "",
+  "description": ""
+}
+```
+
+---
+
+### Ungültige UUID
+
+```typescript
+select public.get_pov_character_by_chapter_id('abc');
+```
+
+Ergebnis:
+
+```typescript
+{
+  "id": null,
+  "name": "",
+  "description": ""
+}
+```
+
+---
+
+### Gültige UUID, aber kein Kapitel gefunden
+
+```typescript
+select public.get_pov_character_by_chapter_id(
+  '11111111-1111-1111-1111-111111111111'
+);
+```
+
+Ergebnis:
+
+```typescript
+{
+  "id": null,
+  "name": "",
+  "description": ""
+}
+```
+
+---
+
+## Aufruf aus Supabase RPC
+
+Endpoint sinngemäß:
+
+```typescript
+/rest/v1/rpc/get_pov_character_by_chapter_id
+```
+
+Request Body:
+
+```typescript
+{
+  "p_chapter_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+}
+```
+
+Antwort:
+
+```typescript
+{
+  "id": "0b2479ee-95bd-458d-8933-62b6e8027f13",
+  "name": "Kirk Washington",
+  "description": "Kirk Washington ist ein junger, impulsiver Rekrut..."
+}
+```
+
+Bei leerem oder ungültigem Wert:
+
+```typescript
+{
+  "id": null,
+  "name": "",
+  "description": ""
+}
+```
+
+---
+
+## Nutzung in n8n
+
+Im Supabase-RPC-Node oder HTTP-Request-Node kannst du die Kapitel-ID dynamisch übergeben.
+
+Beispiel-Body:
+
+```typescript
+{
+  "p_chapter_id": "{{ $json.chapter_id }}"
+}
+```
+
+Oder, wenn die Kapitel-ID aus einem anderen Node kommt:
+
+```typescript
+{
+  "p_chapter_id": "{{ $('Get Chapter').first().json.id }}"
+}
+```
+
+Die Antwort kannst du dann im Prompt verwenden, z. B.:
+
+```typescript
+POV-Figur:
+{{ $json.name }}
+
+POV-Beschreibung:
+{{ $json.description }}
+```
+
+Je nach n8n-Node kann die RPC-Antwort auch in einem Wrapper-Feld liegen. Dann musst du ggf. auf das jeweilige Ergebnisfeld zugreifen, z. B.:
+
+```typescript
+{{ $json.result.name }}
+{{ $json.result.description }}
+```
+
+oder bei Array-Ausgabe:
+
+```typescript
+{{ $json[0].name }}
+{{ $json[0].description }}
+```
+
+Das hängt davon ab, ob du den Supabase-Node, HTTP Request oder einen Postgres-Node verwendest.
+
+---
+
+## Typischer Einsatz im Prompt-Workflow
+
+Die Funktion eignet sich besonders, um einen eigenen POV-Block für die Beat-Ausformulierung zu bauen:
+
+```typescript
+<pov>
+POV-Figur: {{pov.name}}
+
+Beschreibung der POV-Figur:
+{{pov.description}}
+
+Perspektivregel:
+Schreibe in dritter Person limitiert aus der Wahrnehmung dieser Figur.
+Die Szene darf nur zeigen, was diese Figur sieht, hört, spürt, weiß, erinnert, vermutet oder emotional deutet.
+Gedanken und Gefühle anderer Figuren dürfen nicht direkt erzählt werden.
+</pov>
+```
+
+Beispiel mit eingesetztem Wert:
+
+```typescript
+<pov>
+POV-Figur: Kirk Washington
+
+Beschreibung der POV-Figur:
+Kirk Washington ist ein junger, impulsiver Rekrut...
+
+Perspektivregel:
+Schreibe in dritter Person limitiert aus der Wahrnehmung dieser Figur.
+Die Szene darf nur zeigen, was Kirk Washington sieht, hört, spürt, weiß, erinnert, vermutet oder emotional deutet.
+Gedanken und Gefühle anderer Figuren dürfen nicht direkt erzählt werden.
+</pov>
+```
+
+---
+
+## Abgrenzung zu normalem Codex-Matching
+
+Diese Funktion sucht die POV-Figur **nicht über Textmatching**.
+
+Sie verwendet ausschließlich den expliziten Kapitelverweis:
+
+```typescript
+chapters.pov_character_entry_id
+```
+
+Das ist wichtig, weil die POV-Figur nicht einfach irgendeine im Text erwähnte Figur ist, sondern der **Wahrnehmungsfilter des Kapitels**.
+
+Normale Codex-Erkennung:
+
+```typescript
+Figur wird erwähnt → Codex-Kontext wird geladen
+```
+
+POV-Funktion:
+
+```typescript
+Kapitel hat POV-Figur → diese Figur steuert die Erzählperspektive
+```
+
+---
+
+## Wichtige Hinweise
+
+Die Funktion prüft aktuell:
+
+```typescript
+ce.is_active = true
+```
+
+Sie prüft aber nicht zusätzlich:
+
+```typescript
+ce.entry_type = 'character'
+```
+
+Das ist vermutlich in Ordnung, wenn deine UI-Auswahl bereits nach `entry_type = 'character'` filtert.
+
+Falls du die Funktion zusätzlich absichern möchtest, könntest du den Join später erweitern:
+
+```typescript
+and ce.entry_type = 'character'
+```
+
+Dann würden versehentlich falsch verknüpfte Codex-Einträge nicht als POV-Figur zurückgegeben.
+
+Eine abgesicherte Join-Variante wäre:
+
+```typescript
+left join public.codex_entries ce
+  on ce.id = ch.pov_character_entry_id
+ and ce.is_active = true
+ and ce.entry_type = 'character'
+```
+
+Für deinen aktuellen Stand ist die vorhandene Version aber passend, sofern die Auswahl im Frontend sauber gefiltert ist.

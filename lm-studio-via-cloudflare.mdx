@@ -1,0 +1,1089 @@
+---
+title: LM Studio via Cloudflare
+---
+<Image src="https://blob-cdn.documentation.ai/org-a6cc8753-0b43-40ce-a703-63395282d5e9/doc-c0f47072-8de7-4ddd-b984-93be075ee31b/1777108963473-3boqgfld9fm-pasted-image-1777108958641.png?fm=auto&auto=compress%2Cformat" width="1800" height="1050" alt="" />
+
+Ja. Hier ist die Dokumentation als Markdown direkt im Chat.
+
+````typescript
+# Dokumentation: IONOS-Domain mit Cloudflare Tunnel für LM Studio und n8n
+
+## 1. Ziel
+
+Ziel dieser Einrichtung ist es, einen lokalen LM-Studio-Server auf einem Windows-Rechner über eine feste öffentliche HTTPS-Adresse erreichbar zu machen, ohne Ports am Router freizugeben.
+
+Die finale Zieladresse lautet:
+
+```text
+https://lm-shadow.r3495z8.de/v1
+
+````
+
+Diese Adresse kann anschließend z. B. in n8n als OpenAI-kompatible API-Base-URL genutzt werden.
+
+---
+
+## 2. Zielarchitektur
+
+```typescript
+n8n-Server irgendwo im Internet
+        │
+        │ HTTPS
+        ▼
+https://lm-shadow.r3495z8.de/v1
+        │
+        ▼
+Cloudflare DNS
+        │
+        ▼
+Cloudflare Tunnel
+        │
+        ▼
+cloudflared Windows-Dienst
+        │
+        ▼
+LM Studio auf lokalem Rechner
+http://localhost:1234/v1
+
+```
+
+Wichtig:
+
+- n8n muss nicht im selben Netzwerk wie LM Studio stehen.
+
+- Es ist keine Portfreigabe im Router nötig.
+
+- Der lokale Rechner baut selbst eine ausgehende Verbindung zu Cloudflare auf.
+
+- Cloudflare leitet eingehende HTTPS-Anfragen über diesen Tunnel an LM Studio weiter.
+
+---
+
+## 3. Beteiligte Dienste
+
+| Dienst      | Aufgabe                                             |
+| ----------- | --------------------------------------------------- |
+| IONOS       | Registrar und Mailanbieter der Domain               |
+| Cloudflare  | DNS-Verwaltung und Tunnel-Endpunkt                  |
+| cloudflared | Lokaler Tunnel-Dienst auf Windows                   |
+| LM Studio   | Lokale OpenAI-kompatible LLM-API                    |
+| n8n         | Externer Client, der LM Studio über HTTPS anspricht |
+
+---
+
+## 4. Ausgangslage
+
+Die Domain wurde bei IONOS gekauft:
+
+```typescript
+r3495z8.de
+
+```
+
+Bei IONOS war zusätzlich ein Mailserver bzw. Mailpaket aktiv.
+
+Deshalb war wichtig:
+
+- Die Domain-DNS-Verwaltung sollte zu Cloudflare wechseln.
+
+- Die IONOS-Mailfunktion sollte erhalten bleiben.
+
+- Die notwendigen Mail-DNS-Einträge mussten in Cloudflare übernommen werden.
+
+- LM Studio sollte über eine Subdomain veröffentlicht werden:
+
+```typescript
+lm-shadow.r3495z8.de
+
+```
+
+---
+
+# Teil A: IONOS-Domain zu Cloudflare bringen
+
+## 5. Domain in Cloudflare hinzufügen
+
+In Cloudflare wurde die Domain hinzugefügt:
+
+```typescript
+r3495z8.de
+
+```
+
+Cloudflare scannt dabei vorhandene DNS-Einträge bei IONOS und zeigt anschließend eine Liste gefundener Records.
+
+Typische Anzeige:
+
+```typescript
+Review your DNS records
+Records we found:
+1 A
+1 AAAA
+3 CNAME
+2 MX
+1 TXT
+
+```
+
+Cloudflare weist darauf hin, dass der Scan unvollständig sein kann. Das ist normal.
+
+Besonders wichtig sind:
+
+```typescript
+A
+AAAA
+CNAME
+MX
+TXT
+
+```
+
+Für Mail zusätzlich:
+
+```typescript
+SPF
+DKIM
+DMARC
+autodiscover
+
+```
+
+---
+
+## 6. DNS-Records in Cloudflare prüfen
+
+Cloudflare hatte einige Records automatisch übernommen.
+
+Wichtig war, dass die Mail-Records nicht orange „Proxied“, sondern grau „DNS only“ sind.
+
+### Richtige Mail-Records
+
+Diese Einträge sollten in Cloudflare vorhanden sein:
+
+```typescript
+MX     r3495z8.de              mx00.ionos.de
+MX     r3495z8.de              mx01.ionos.de
+TXT    r3495z8.de              v=spf1 include:_spf-eu.ionos.com ~all
+CNAME  _dmarc                  dmarc.ionos.de
+CNAME  autodiscover            adsredir.ionos.info
+CNAME  _domainconnect          _domainconnect.ionos.com
+CNAME  s1-ionos._domainkey     s1.dkim.ionos.com
+CNAME  s2-ionos._domainkey     s2.dkim.ionos.com
+
+```
+
+Alle diese Einträge sollten auf:
+
+```typescript
+DNS only
+
+```
+
+stehen.
+
+Nicht:
+
+```typescript
+Proxied
+
+```
+
+---
+
+## 7. DKIM-Einträge manuell ergänzen
+
+Cloudflare hatte zunächst nicht alle DKIM-Einträge übernommen.
+
+Bei IONOS waren diese beiden DKIM-CNAMEs sichtbar:
+
+```typescript
+s1-ionos._domainkey → s1.dkim.ionos.com
+s2-ionos._domainkey → s2.dkim.ionos.com
+
+```
+
+Diese wurden in Cloudflare manuell ergänzt.
+
+### Erster DKIM-Record
+
+```typescript
+Type: CNAME
+Name: s1-ionos._domainkey
+Target: s1.dkim.ionos.com
+Proxy status: DNS only
+TTL: Auto
+
+```
+
+### Zweiter DKIM-Record
+
+```typescript
+Type: CNAME
+Name: s2-ionos._domainkey
+Target: s2.dkim.ionos.com
+Proxy status: DNS only
+TTL: Auto
+
+```
+
+Wichtig:\
+Bei einem Eintrag wurde versehentlich `1-ionos._domainkey` statt `s1-ionos._domainkey` eingetragen. Das musste korrigiert werden.
+
+Richtig ist:
+
+```typescript
+s1-ionos._domainkey
+
+```
+
+Nicht:
+
+```typescript
+1-ionos._domainkey
+
+```
+
+---
+
+## 8. A- und AAAA-Record
+
+Cloudflare zeigte außerdem:
+
+```typescript
+A     r3495z8.de      217.160.0.248
+AAAA  r3495z8.de      2001:8d8:...
+
+```
+
+Diese Records betreffen die Root-Domain:
+
+```typescript
+r3495z8.de
+
+```
+
+Für Mail sind sie nicht entscheidend.
+
+Sie können orange „Proxied“ bleiben, wenn dort Webverkehr über Cloudflare laufen soll. Für den LM-Studio-Tunnel sind sie ebenfalls nicht entscheidend, da LM Studio über eine eigene Subdomain läuft:
+
+```typescript
+lm-shadow.r3495z8.de
+
+```
+
+---
+
+# Teil B: Nameserver bei IONOS ändern
+
+## 9. Cloudflare-Nameserver
+
+Cloudflare verlangte, die IONOS-Nameserver durch Cloudflare-Nameserver zu ersetzen.
+
+Cloudflare gab diese Nameserver vor:
+
+```typescript
+lochlan.ns.cloudflare.com
+sue.ns.cloudflare.com
+
+```
+
+Die alten IONOS-Nameserver waren ungefähr:
+
+```typescript
+ns1043.ui-dns.com
+ns1104.ui-dns.de
+ns1117.ui-dns.biz
+ns1255.ui-dns.org
+
+```
+
+Diese sollten ersetzt werden.
+
+---
+
+## 10. Nameserver in IONOS finden
+
+In IONOS führte der Weg über:
+
+```typescript
+Domains & SSL
+→ r3495z8.de
+→ Verwendungsart anpassen
+→ Nameserver
+
+```
+
+Wichtig:
+
+Nicht den Tab „DNS“ verwenden, wenn man die Nameserver ändern möchte.
+
+In der IONOS-Ansicht gab es oben Reiter wie:
+
+```typescript
+Details
+Subdomains
+Kontaktdaten
+Umzug & Verlängerung
+Nameserver
+DNS
+
+```
+
+Der richtige Reiter war:
+
+```typescript
+Nameserver
+
+```
+
+---
+
+## 11. Nameserver erfolgreich geändert
+
+Nach dem Speichern zeigte IONOS:
+
+```typescript
+Nameserver erfolgreich geändert
+Ihre personalisierten Nameserver werden übernommen.
+
+```
+
+IONOS weist darauf hin, dass es bis zu 48 Stunden dauern kann.
+
+In der Praxis dauert es häufig nur Minuten bis wenige Stunden.
+
+Danach wurde in Cloudflare auf:
+
+```typescript
+I updated my nameservers
+
+```
+
+geklickt.
+
+---
+
+# Teil C: Cloudflare Tunnel einrichten
+
+## 12. Ziel des Tunnels
+
+Der Tunnel soll diese öffentliche Adresse bereitstellen:
+
+```typescript
+https://lm-shadow.r3495z8.de
+
+```
+
+und intern weiterleiten auf:
+
+```typescript
+http://localhost:1234
+
+```
+
+Damit wird daraus für die OpenAI-kompatible LM-Studio-API:
+
+```typescript
+https://lm-shadow.r3495z8.de/v1
+
+```
+
+---
+
+## 13. Tunnel in Cloudflare erstellen
+
+In Cloudflare:
+
+```typescript
+Zero Trust
+→ Networks
+→ Tunnels
+→ Create a tunnel
+
+```
+
+Tunneltyp:
+
+```typescript
+Cloudflared
+
+```
+
+Tunnelname:
+
+```typescript
+lm-shadow
+
+```
+
+Danach zeigte Cloudflare einen Installationsbefehl für Windows.
+
+---
+
+## 14. cloudflared auf Windows installieren
+
+Der Befehl wurde in einer Administrator-PowerShell ausgeführt:
+
+```typescript
+cloudflared.exe service install <TOKEN>
+
+```
+
+Beispielstruktur:
+
+```typescript
+cloudflared.exe service install eyJhIjoi...
+
+```
+
+Wichtig:
+
+- PowerShell als Administrator starten.
+
+- Den Token nicht manuell verändern.
+
+- Den Befehl aus dem aktuellen Cloudflare-Tunnel verwenden.
+
+---
+
+## 15. Problem: cloudflared war bereits installiert
+
+Beim ersten Versuch meldete PowerShell:
+
+```typescript
+cloudflared is already installed at Cloudflared
+
+```
+
+Das bedeutete:
+
+- Auf dem Rechner lief bereits ein cloudflared-Windows-Dienst.
+
+- Das Töten der `.exe` reichte nicht, weil Windows den Dienst weiter verwaltet.
+
+Lösung:
+
+```typescript
+Stop-Service cloudflared
+cloudflared service uninstall
+
+```
+
+Falls nötig:
+
+```typescript
+sc.exe delete cloudflared
+
+```
+
+Danach prüfen:
+
+```typescript
+Get-Service cloudflared
+
+```
+
+Wenn der Dienst nicht mehr gefunden wird, ist er entfernt.
+
+Anschließend wurde der aktuelle Cloudflare-Installationsbefehl erneut ausgeführt.
+
+---
+
+## 16. Tunnelstatus prüfen
+
+Nach erfolgreicher Installation zeigte Cloudflare im Tunnel:
+
+```typescript
+Status: Healthy
+Active replicas: 1
+Routes: 0
+
+```
+
+Das bedeutet:
+
+- Der Windows-Dienst läuft.
+
+- Der Tunnel ist verbunden.
+
+- Es fehlt nur noch eine Route bzw. Published Application.
+
+---
+
+# Teil D: Route / Published Application einrichten
+
+## 17. Route hinzufügen
+
+Im Tunnel wurde geklickt:
+
+```typescript
+Add route
+
+```
+
+Cloudflare zeigte mehrere Optionen:
+
+```typescript
+Published application
+Private hostname
+Private CIDR
+Workers VPC
+
+```
+
+Für LM Studio wurde gewählt:
+
+```typescript
+Published application
+
+```
+
+Das ist die richtige Option für:
+
+```typescript
+öffentliche Subdomain
+→ Cloudflare Tunnel
+→ lokaler Dienst
+
+```
+
+---
+
+## 18. Published Application konfigurieren
+
+In der Maske „Add published application“ wurden folgende Werte eingetragen:
+
+```typescript
+Subdomain: lm-shadow
+Domain: r3495z8.de
+Path: leer lassen
+Service URL: http://localhost:1234
+
+```
+
+Vollständiger Hostname:
+
+```typescript
+lm-shadow.r3495z8.de
+
+```
+
+Wichtig:
+
+### Path leer lassen
+
+Nicht:
+
+```typescript
+/blog
+
+```
+
+Sondern leer.
+
+### Service URL mit http
+
+Richtig:
+
+```typescript
+http://localhost:1234
+
+```
+
+Nicht:
+
+```typescript
+https://localhost:1234
+
+```
+
+LM Studio läuft lokal normalerweise per HTTP, nicht HTTPS.
+
+---
+
+## 19. Ergebnis
+
+Nach dem Speichern ist diese Adresse öffentlich erreichbar:
+
+```typescript
+https://lm-shadow.r3495z8.de
+
+```
+
+Die OpenAI-kompatible API liegt unter:
+
+```typescript
+https://lm-shadow.r3495z8.de/v1
+
+```
+
+---
+
+# Teil E: LM Studio konfigurieren
+
+## 20. LM Studio Server starten
+
+In LM Studio:
+
+```typescript
+Developer / Local Server
+→ Modell laden
+→ Server starten
+
+```
+
+Der lokale Standard-Port ist:
+
+```typescript
+1234
+
+```
+
+Lokal testen:
+
+```typescript
+http://localhost:1234/v1/models
+
+```
+
+Wenn LM Studio korrekt läuft, erscheint eine JSON-Antwort mit den verfügbaren Modellen.
+
+---
+
+## 21. Extern über Cloudflare testen
+
+Danach extern testen:
+
+```typescript
+https://lm-shadow.r3495z8.de/v1/models
+
+```
+
+Wenn alles korrekt ist, erscheint ebenfalls eine JSON-Antwort mit den verfügbaren Modellen.
+
+---
+
+## 22. LM-Studio-API-Token aktivieren
+
+Da n8n über OpenAI-kompatible Nodes zugreift, ist Cloudflare Access mit zusätzlichen Headern oft unpraktisch.
+
+Deshalb ist der pragmatische Weg:
+
+```typescript
+Cloudflare Tunnel öffentlich erreichbar
++
+LM Studio API Token aktivieren
++
+n8n verwendet dieses Token als API-Key
+
+```
+
+In LM Studio sollte ein langes, zufälliges Token gesetzt werden.
+
+Beispiel:
+
+```typescript
+lmst_8f3Kx92qZpL7vN4sQeR6tY1mA0bC5uH9
+
+```
+
+Kein einfaches Token wie:
+
+```typescript
+test
+1234
+lm-studio
+
+```
+
+---
+
+# Teil F: n8n konfigurieren
+
+## 23. Base URL in n8n
+
+In n8n wird beim OpenAI-kompatiblen Modell bzw. AI-Agent-Modell eingetragen:
+
+```typescript
+Base URL:
+https://lm-shadow.r3495z8.de/v1
+
+```
+
+API Key:
+
+```typescript
+<dein LM-Studio-Token>
+
+```
+
+Der Model-Name muss dem entsprechen, was LM Studio unter `/v1/models` zurückgibt.
+
+---
+
+## 24. Test mit curl
+
+Testaufruf:
+
+```typescript
+curl https://lm-shadow.r3495z8.de/v1/models \
+  -H "Authorization: Bearer DEIN_LM_STUDIO_TOKEN"
+
+```
+
+Wenn das funktioniert, sollte n8n grundsätzlich ebenfalls funktionieren.
+
+---
+
+## 25. Beispiel für Chat Completion
+
+```typescript
+curl https://lm-shadow.r3495z8.de/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer DEIN_LM_STUDIO_TOKEN" \
+  -d '{
+    "model": "DEIN_MODELLNAME",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Schreibe einen kurzen Test."
+      }
+    ],
+    "temperature": 0.7
+  }'
+
+```
+
+---
+
+# Teil G: Sicherheit
+
+## 26. Warum Cloudflare Access nicht zwingend verwendet wurde
+
+Cloudflare Access kann eine Anwendung schützen, benötigt dann aber zusätzliche Header:
+
+```typescript
+CF-Access-Client-Id
+CF-Access-Client-Secret
+
+```
+
+Viele normale OpenAI-kompatible AI-Agent-Nodes in n8n geben solche zusätzlichen Header nicht sauber weiter.
+
+Deshalb wurde für diesen Fall bevorzugt:
+
+```typescript
+LM Studio Token
+
+```
+
+statt:
+
+```typescript
+Cloudflare Access Service Token
+
+```
+
+---
+
+## 27. Sicherheitsbewertung
+
+Die Adresse:
+
+```typescript
+https://lm-shadow.r3495z8.de/v1
+
+```
+
+ist öffentlich erreichbar.
+
+Der eigentliche Schutz liegt dann im LM-Studio-Token.
+
+Das ist praktikabel, aber nicht maximal sicher.
+
+Besser wäre zusätzlich:
+
+- Zugriff nur von fester n8n-IP erlauben, falls vorhanden
+
+- Cloudflare WAF-Regeln
+
+- Rate Limiting
+
+- langer zufälliger API-Key
+
+- regelmäßiger Tokenwechsel
+
+---
+
+# Teil H: Troubleshooting
+
+## 28. Cloudflare zeigt Tunnel nicht als Healthy
+
+Prüfen:
+
+```typescript
+Get-Service cloudflared
+
+```
+
+Falls nicht laufend:
+
+```typescript
+Start-Service cloudflared
+
+```
+
+Falls alter Dienst stört:
+
+```typescript
+Stop-Service cloudflared
+cloudflared service uninstall
+
+```
+
+Dann neu installieren mit aktuellem Tunnel-Token.
+
+---
+
+## 29. `/v1/models` funktioniert lokal, aber nicht extern
+
+Prüfen:
+
+1. Läuft LM Studio?
+
+2. Läuft der Local Server in LM Studio?
+
+3. Ist der Cloudflare Tunnel Healthy?
+
+4. Ist die Published Application korrekt eingerichtet?
+
+5. Ist Service URL korrekt?
+
+Richtig:
+
+```typescript
+http://localhost:1234
+
+```
+
+Falsch:
+
+```typescript
+https://localhost:1234
+
+```
+
+---
+
+## 30. Externe Adresse zeigt Fehler 502 / Bad Gateway
+
+Mögliche Ursachen:
+
+- LM Studio läuft nicht.
+
+- LM Studio läuft auf anderem Port.
+
+- Service URL in Cloudflare ist falsch.
+
+- cloudflared läuft auf einem anderen Rechner als LM Studio.
+
+- Windows-Firewall oder lokale Bindung blockiert.
+
+Prüfen:
+
+```typescript
+http://localhost:1234/v1/models
+
+```
+
+direkt auf dem Windows-Rechner.
+
+---
+
+## 31. n8n bekommt Auth-Fehler
+
+Prüfen:
+
+- Ist LM-Studio-Token aktiviert?
+
+- Ist der API-Key in n8n exakt identisch?
+
+- Wird `Authorization: Bearer <token>` gesendet?
+
+- Ist die Base URL korrekt?
+
+Richtig:
+
+```typescript
+https://lm-shadow.r3495z8.de/v1
+
+```
+
+Nicht:
+
+```typescript
+https://lm-shadow.r3495z8.de
+
+```
+
+Viele OpenAI-kompatible Nodes erwarten die Base URL inklusive `/v1`.
+
+---
+
+## 32. Mailprobleme nach Nameserverwechsel
+
+Prüfen, ob diese Records in Cloudflare vorhanden sind:
+
+```typescript
+MX     r3495z8.de              mx00.ionos.de
+MX     r3495z8.de              mx01.ionos.de
+TXT    r3495z8.de              v=spf1 include:_spf-eu.ionos.com ~all
+CNAME  _dmarc                  dmarc.ionos.de
+CNAME  autodiscover            adsredir.ionos.info
+CNAME  s1-ionos._domainkey     s1.dkim.ionos.com
+CNAME  s2-ionos._domainkey     s2.dkim.ionos.com
+
+```
+
+Alle auf:
+
+```typescript
+DNS only
+
+```
+
+Nicht auf:
+
+```typescript
+Proxied
+
+```
+
+---
+
+# Teil I: Zusammenfassung
+
+## 33. Finale Konfiguration
+
+### Domain
+
+```typescript
+r3495z8.de
+
+```
+
+Registrar:
+
+```typescript
+IONOS
+
+```
+
+DNS-Verwaltung:
+
+```typescript
+Cloudflare
+
+```
+
+Nameserver:
+
+```typescript
+lochlan.ns.cloudflare.com
+sue.ns.cloudflare.com
+
+```
+
+### Mail
+
+Mailanbieter:
+
+```typescript
+IONOS
+
+```
+
+Wichtige Mail-DNS-Records:
+
+```typescript
+MX
+SPF
+DKIM
+DMARC
+autodiscover
+
+```
+
+### Tunnel
+
+Tunnelname:
+
+```typescript
+lm-shadow
+
+```
+
+Cloudflare-Route:
+
+```typescript
+lm-shadow.r3495z8.de
+
+```
+
+Service URL:
+
+```typescript
+http://localhost:1234
+
+```
+
+### LM Studio
+
+Lokale API:
+
+```typescript
+http://localhost:1234/v1
+
+```
+
+Öffentliche API:
+
+```typescript
+https://lm-shadow.r3495z8.de/v1
+
+```
+
+### n8n
+
+Base URL:
+
+```typescript
+https://lm-shadow.r3495z8.de/v1
+
+```
+
+API Key:
+
+```typescript
+LM-Studio-Token
+
+```
+
+---
+
+# Teil J: Merksatz
+
+Die entscheidende Logik lautet:
+
+```typescript
+IONOS bleibt Domain- und Mailanbieter.
+Cloudflare übernimmt DNS.
+Cloudflare Tunnel verbindet die öffentliche Subdomain mit deinem lokalen Rechner.
+LM Studio liefert lokal die OpenAI-kompatible API.
+n8n spricht LM Studio über die Cloudflare-Subdomain an.
+
+```
+
+```typescript
+```
+

@@ -1,0 +1,442 @@
+---
+title: get_beat_prompt_parameter_payload
+---
+# `public.get_beat_prompt_parameter_payload(p_beat_id uuid)`
+
+## Zweck
+
+Diese Funktion liefert für eine gegebene `beat_id` alle **effektiven Prompt-Parameterwerte** eines zugewiesenen Prompts als ein strukturiertes JSON-Payload zurück.
+
+Sie dient dazu, in n8n oder anderen Verarbeitungsschritten alle einem Beat zugeordneten Prompt-Felder samt ihrer effektiven Werte zentral bereitzustellen.
+
+Die Funktion berücksichtigt dabei sowohl:
+
+- die dem Beat zugewiesene Prompt-Definition
+
+- die Felder des Prompts aus `prompt_library_fields`
+
+- die konkret gesetzten Werte aus `beat_prompt_assignment_values`
+
+- die Default-Werte aus `prompt_library_fields.default_value_json`
+
+---
+
+## Erklärung
+
+Für einen Beat gibt es maximal eine Prompt-Zuweisung in `beat_prompt_assignments`.
+
+Diese Zuweisung verweist auf einen Eintrag in `prompt_library`.
+
+Die Funktion macht dann Folgendes:
+
+### Schritt 1: Assignment und Prompt ermitteln
+
+Es wird die Prompt-Zuweisung für die übergebene `beat_id` geladen.
+
+### Schritt 2: Alle Felder dieses Prompts laden
+
+Aus `prompt_library_fields` werden alle definierten Felder des Prompts geholt.
+
+### Schritt 3: Assignment-Werte darüberlegen
+
+Wenn für ein Feld ein expliziter Wert in `beat_prompt_assignment_values` existiert, wird dieser verwendet.
+
+### Schritt 4: Sonst Default verwenden
+
+Wenn kein Assignment-Wert vorhanden ist, wird der `default_value_json` des Feldes genutzt.
+
+### Schritt 5: JSON-Payload bauen
+
+Es werden zwei Strukturen erzeugt:
+
+#### `parameter`
+
+Ein flaches Objekt mit den effektiven Feldwerten, ideal zur direkten Ersetzung von `parameter.xyz`
+
+#### `parameter_meta`
+
+Ein detaillierteres Objekt mit Zusatzinformationen je Feld, z. B. Typ, Label, Default, Assigned Value und Effective Value
+
+---
+
+## Signatur
+
+```typescript
+public.get_beat_prompt_parameter_payload(p_beat_id uuid) returns jsonb
+```
+
+---
+
+## Parameter
+
+### `p_beat_id`
+
+**Typ:** `uuid`
+
+Die Beat-ID, für die die Prompt-Zuweisung und alle zugehörigen Parameterwerte ermittelt werden sollen.
+
+---
+
+## Rückgabestruktur
+
+Die Funktion liefert ein JSONB-Objekt in etwa dieser Form:
+
+```typescript
+{
+  "beat_id": "...",
+  "assignment_id": "...",
+  "prompt_id": "...",
+  "prompt_title": "...",
+  "prompt_slug": "...",
+  "system_prompt_template": "...",
+  "user_prompt_template": "...",
+  "parameter": {
+    "crew_trust": "63",
+    "route_locked": "true",
+    "ilyr_cipher": "AUR"
+  },
+  "parameter_meta": {
+    "crew_trust": {
+      "field_id": "...",
+      "field_key": "crew_trust",
+      "label": "Crew-Vertrauen",
+      "field_type": "number",
+      "help_text": null,
+      "placeholder": null,
+      "is_required": false,
+      "default_value_json": {},
+      "assigned_value_json": { "value": "63" },
+      "effective_value_json": { "value": "63" },
+      "value": "63",
+      "sort_order": 0
+    }
+  }
+}
+```
+
+---
+
+## Bedeutende Rückgabefelder
+
+### `beat_id`
+
+Die übergebene Beat-ID.
+
+### `assignment_id`
+
+Die ID der Prompt-Zuweisung zu diesem Beat.
+
+### `prompt_id`
+
+Die ID des zugewiesenen Prompt-Eintrags aus `prompt_library`.
+
+### `prompt_title`
+
+Titel des zugewiesenen Prompts.
+
+### `prompt_slug`
+
+Optionaler Slug des Prompts.
+
+### `system_prompt_template`
+
+Das System-Prompt-Template des Prompts.
+
+### `user_prompt_template`
+
+Das User-Prompt-Template des Prompts.
+
+### `parameter`
+
+Flaches JSON-Objekt mit effektiven Parameterwerten.
+
+Dieses Feld ist für n8n besonders praktisch, weil darin Referenzen wie
+
+```typescript
+parameter.crew_trust
+parameter.route_locked
+```
+
+leicht ersetzt werden können.
+
+### `parameter_meta`
+
+Detailliertes JSON-Objekt mit Zusatzinformationen pro Feld.
+
+Dieses Feld ist eher für Debugging, UI oder erweiterte Verarbeitungen gedacht.
+
+---
+
+## Aufrufbeispiel
+
+```typescript
+select public.get_beat_prompt_parameter_payload(
+  '11111111-2222-3333-4444-555555555555'::uuid
+);
+```
+
+---
+
+## Rückgabebeispiel
+
+```typescript
+{
+  "beat_id": "11111111-2222-3333-4444-555555555555",
+  "assignment_id": "aaaa1111-2222-3333-4444-bbbbbbbbbbbb",
+  "prompt_id": "cccc1111-2222-3333-4444-dddddddddddd",
+  "prompt_title": "Szenenentwurf",
+  "prompt_slug": "szenenentwurf",
+  "system_prompt_template": "Du bist ein strukturierter Romanautor.",
+  "user_prompt_template": "Arbeite den Beat aus.",
+  "parameter": {
+    "crew_trust": "63",
+    "route_locked": "true",
+    "reactor_stability": "61",
+    "ilyr_cipher": "AUR",
+    "market_debt": "true"
+  },
+  "parameter_meta": {
+    "crew_trust": {
+      "field_id": "eeee1111-2222-3333-4444-ffffffffffff",
+      "field_key": "crew_trust",
+      "label": "Crew-Vertrauen",
+      "field_type": "number",
+      "help_text": null,
+      "placeholder": null,
+      "is_required": false,
+      "default_value_json": {},
+      "assigned_value_json": {
+        "value": "63"
+      },
+      "effective_value_json": {
+        "value": "63"
+      },
+      "value": "63",
+      "sort_order": 10
+    },
+    "route_locked": {
+      "field_id": "99991111-2222-3333-4444-aaaaaaaaaaaa",
+      "field_key": "route_locked",
+      "label": "Route gesichert",
+      "field_type": "checkbox",
+      "help_text": null,
+      "placeholder": null,
+      "is_required": false,
+      "default_value_json": {},
+      "assigned_value_json": {
+        "value": "true"
+      },
+      "effective_value_json": {
+        "value": "true"
+      },
+      "value": "true",
+      "sort_order": 20
+    }
+  }
+}
+```
+
+---
+
+## Verhalten bei fehlender Prompt-Zuweisung
+
+Wenn für die übergebene `beat_id` keine Prompt-Zuweisung gefunden wird, liefert die Funktion ein leeres Grundgerüst zurück:
+
+```typescript
+{
+  "beat_id": "...",
+  "assignment_id": null,
+  "prompt_id": null,
+  "prompt_title": null,
+  "prompt_slug": null,
+  "system_prompt_template": null,
+  "user_prompt_template": null,
+  "parameter": {},
+  "parameter_meta": {}
+}
+```
+
+---
+
+## Typischer Einsatzzweck in n8n
+
+Ein häufiger Ablauf ist:
+
+1. &#x20;Beat-ID an Supabase übergeben&#x20;
+
+2. `get_beat_prompt_parameter_payload(...)` aufrufen&#x20;
+
+3. &#x20;Ergebnis in n8n empfangen&#x20;
+
+4. &#x20;Alle Referenzen der Form `parameter.xyz` im Prompt-Template ersetzen&#x20;
+
+5. &#x20;Danach den Template-/If-/Switch-Interpreter laufen lassen&#x20;
+
+Beispiel für einen späteren Template-Ausdruck:
+
+```typescript
+{% if ("parameter.crew_trust").toInt() > 150 %}
+hoch
+{% else %}
+niedrig
+{% endif %}
+```
+
+Nach der Ersetzung durch n8n soll daraus etwa werden:
+
+```typescript
+{% if ("63").toInt() > 150 %}
+hoch
+{% else %}
+niedrig
+{% endif %}
+```
+
+---
+
+## Zusammenfassung
+
+### `extract_prompt_value_text`
+
+Hilfsfunktion zur Vereinheitlichung von JSON-Werten in Textform.
+
+### `get_beat_prompt_parameter_payload`
+
+Zentrale Payload-Funktion, um für einen Beat alle effektiven Prompt-Parameter inklusive Metadaten als JSON bereitzustellen.
+
+Diese Kombination ist besonders nützlich, wenn Prompt-Templates später in n8n dynamisch mit echten Beat-Parametern angereichert werden sollen.
+
+# SQL
+
+```typescript
+create or replace function public.get_beat_prompt_parameter_payload(
+  p_beat_id uuid
+)
+returns jsonb
+language plpgsql
+stable
+as $$
+declare
+  v_result jsonb;
+begin
+  with assignment_base as (
+    select
+      bpa.id as assignment_id,
+      bpa.beat_id,
+      bpa.prompt_id,
+      pl.title as prompt_title,
+      pl.slug as prompt_slug,
+      pl.system_prompt_template,
+      pl.user_prompt_template
+    from public.beat_prompt_assignments bpa
+    join public.prompt_library pl
+      on pl.id = bpa.prompt_id
+    where bpa.beat_id = p_beat_id
+    limit 1
+  ),
+  field_rows as (
+    select
+      ab.beat_id,
+      ab.assignment_id,
+      ab.prompt_id,
+      ab.prompt_title,
+      ab.prompt_slug,
+      ab.system_prompt_template,
+      ab.user_prompt_template,
+
+      plf.id as field_id,
+      plf.field_key,
+      plf.label,
+      plf.field_type,
+      plf.help_text,
+      plf.placeholder,
+      plf.is_required,
+      plf.default_value_json,
+      plf.sort_order,
+
+      bpav.id as assignment_value_id,
+      bpav.value_json as assigned_value_json,
+
+      coalesce(bpav.value_json, plf.default_value_json) as effective_value_json,
+      public.extract_prompt_value_text(
+        coalesce(bpav.value_json, plf.default_value_json)
+      ) as effective_value_text
+    from assignment_base ab
+    join public.prompt_library_fields plf
+      on plf.prompt_id = ab.prompt_id
+    left join public.beat_prompt_assignment_values bpav
+      on bpav.assignment_id = ab.assignment_id
+     and bpav.field_key = plf.field_key
+  ),
+  parameter_json as (
+    select
+      coalesce(
+        jsonb_object_agg(
+          fr.field_key,
+          to_jsonb(fr.effective_value_text)
+          order by fr.sort_order, fr.field_key
+        ),
+        '{}'::jsonb
+      ) as parameter_obj
+    from field_rows fr
+  ),
+  parameter_meta_json as (
+    select
+      coalesce(
+        jsonb_object_agg(
+          fr.field_key,
+          jsonb_build_object(
+            'field_id', fr.field_id,
+            'field_key', fr.field_key,
+            'label', fr.label,
+            'field_type', fr.field_type,
+            'help_text', fr.help_text,
+            'placeholder', fr.placeholder,
+            'is_required', fr.is_required,
+            'default_value_json', fr.default_value_json,
+            'assigned_value_json', fr.assigned_value_json,
+            'effective_value_json', fr.effective_value_json,
+            'value', fr.effective_value_text,
+            'sort_order', fr.sort_order
+          )
+          order by fr.sort_order, fr.field_key
+        ),
+        '{}'::jsonb
+      ) as parameter_meta_obj
+    from field_rows fr
+  )
+  select jsonb_build_object(
+    'beat_id', ab.beat_id,
+    'assignment_id', ab.assignment_id,
+    'prompt_id', ab.prompt_id,
+    'prompt_title', ab.prompt_title,
+    'prompt_slug', ab.prompt_slug,
+    'system_prompt_template', ab.system_prompt_template,
+    'user_prompt_template', ab.user_prompt_template,
+    'parameter', pj.parameter_obj,
+    'parameter_meta', pmj.parameter_meta_obj
+  )
+  into v_result
+  from assignment_base ab
+  cross join parameter_json pj
+  cross join parameter_meta_json pmj;
+
+  if v_result is null then
+    return jsonb_build_object(
+      'beat_id', p_beat_id,
+      'assignment_id', null,
+      'prompt_id', null,
+      'prompt_title', null,
+      'prompt_slug', null,
+      'system_prompt_template', null,
+      'user_prompt_template', null,
+      'parameter', '{}'::jsonb,
+      'parameter_meta', '{}'::jsonb
+    );
+  end if;
+
+  return v_result;
+end;
+$$;
+```
+

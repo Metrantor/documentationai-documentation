@@ -60,6 +60,16 @@
                 "icon": "package",
                 "pages": [
                   {
+                    "group": "Anbindung von LLM Modellen (LM Studio)",
+                    "pages": [
+                      {
+                        "title": "LM Studio via Cloudflare",
+                        "path": "lm-studio-via-cloudflare"
+                      }
+                    ],
+                    "icon": "plug"
+                  },
+                  {
                     "title": "Integrations",
                     "path": "integrations",
                     "icon": "plug"
@@ -68,11 +78,34 @@
               },
               {
                 "group": "Konzepte",
-                "pages": []
+                "pages": [
+                  {
+                    "group": "Streamen im Writer",
+                    "pages": [
+                      {
+                        "title": "streaming funktion in supabase",
+                        "path": "streaming-funktion-in-supabase"
+                      }
+                    ]
+                  }
+                ]
               },
               {
                 "group": "Funktionen",
                 "pages": [
+                  {
+                    "group": "Prompt-Variablen auswerten",
+                    "pages": [
+                      {
+                        "title": "get_beat_prompt_parameter_payload",
+                        "path": "get-beat-prompt-parameter-payload"
+                      },
+                      {
+                        "title": "extract_prompt_value_text",
+                        "path": "extract_prompt_value_text"
+                      }
+                    ]
+                  },
                   {
                     "group": "Story Context Aggregation V2",
                     "pages": [
@@ -393,6 +426,14 @@
                     "group": "Technische Dokumentation Codex + Super Codex",
                     "pages": [
                       {
+                        "title": "get_pov_character_by_chapter_id",
+                        "path": "get-pov-character-by-chapter-id"
+                      },
+                      {
+                        "title": "get_codex_description_by_id",
+                        "path": "get-codex-description-by-id"
+                      },
+                      {
                         "title": "Technische Doskumentation der Supabase Funktionen",
                         "path": "technische-doskumentation-der-supabase-funktionen"
                       },
@@ -428,6 +469,15 @@
               {
                 "group": "Prompts",
                 "pages": [
+                  {
+                    "group": "Prompts von novelcrafter",
+                    "pages": [
+                      {
+                        "title": "Default Writer",
+                        "path": "default-writer"
+                      }
+                    ]
+                  },
                   {
                     "title": "Inhalte eines Prompts",
                     "path": "inhalte-eines-prompts"
