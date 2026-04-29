@@ -1,0 +1,228 @@
+---
+title: Tipps und Tricks
+---
+# Tipps, Tricks und Best Practice
+
+Damit Templates stabil, lesbar und wartbar bleiben, empfiehlt es sich, Platzhalter immer möglichst **typensicher** zu verwenden, Werte vor Vergleichen zu **normalisieren** und komplexere Logik bewusst **einfach und lesbar** zu halten.
+
+## 1. Zahlen immer explizit umwandeln
+
+Statt Zahlenwerte direkt als Text zu vergleichen, sollten sie vor dem Vergleich immer in Zahlen umgewandelt werden.
+
+**Gut:**
+
+```typescript
+{% if ("{{crew_trust}}").toInt() > 150 %}
+Das Vertrauen ist hoch.
+{% endif %}
+
+```
+
+**Weniger gut:**
+
+```typescript
+{% if "{{crew_trust}}" > 150 %}
+
+```
+
+Warum: So vermeidest du, dass ein Zahlenwert versehentlich als String behandelt wird.
+
+---
+
+## 2. Wahrheitswerte und Statusstrings normalisieren
+
+Wenn ein Wert wie `true`, `TRUE`, `True` oder `false` aus einer Datenquelle kommt, sollte er vor dem Vergleich vereinheitlicht werden.
+
+**Empfohlen:**
+
+```typescript
+{% if ("{{route_locked}}").trim().lower() == "true" %}
+Route gesichert.
+{% endif %}
+
+```
+
+Warum: Das macht das Template robuster gegen unterschiedliche Schreibweisen.
+
+---
+
+## 3. Leere Texte sicher prüfen
+
+Wenn unklar ist, ob ein Textinhalt vorhanden ist, sollte nicht nur auf „irgendwas“ geprüft werden, sondern auf einen bereinigten Inhalt.
+
+**Empfohlen:**
+
+```typescript
+{% if ("{{codex_context}}").trim().length() > 0 %}
+Codex vorhanden.
+{% endif %}
+
+```
+
+Warum: So werden auch reine Leerzeichen korrekt als „leer“ behandelt.
+
+---
+
+## 4. Große Texte immer bewusst begrenzen
+
+Lange Drafts, Codex-Blöcke oder Verlaufstexte sollten möglichst nie ungefiltert in den Prompt laufen, sondern gezielt gekürzt werden.
+
+**Beispiel:**
+
+```typescript
+{{current_chapter_draft_before_beat:last:5000}}
+
+```
+
+oder
+
+```typescript
+{{super_codex:first:8000}}
+
+```
+
+Warum: Das spart Kontextfenster und hält Prompts fokussiert.
+
+---
+
+## 5. Datumswerte nur als ISO-Strings verwenden
+
+Für Datumslogik sollten möglichst nur ISO-Formate verwendet werden.
+
+**Gut:**
+
+```typescript
+"2025-01-10T12:00:00Z"
+"2025-01-10"
+
+```
+
+**Nicht ideal:**
+
+```typescript
+"10.01.2025"
+"10/01/2025"
+
+```
+
+Warum: ISO-Strings sind deutlich robuster und eindeutiger.
+
+---
+
+## 6. Komplexe Bedingungen mit Klammern lesbar machen
+
+Auch wenn der Interpreter Prioritäten kennt, sollten längere Bedingungen mit Klammern strukturiert werden.
+
+**Empfohlen:**
+
+```typescript
+{% if (("{{route_locked}}").lower() == "true" and ("{{crew_trust}}").toInt() > 50) or ("{{nexus_trace}}").toInt() > 8 %}
+Trigger aktiv.
+{% endif %}
+
+```
+
+Warum: Das macht die Logik leichter verständlich und reduziert Fehler beim späteren Anpassen.
+
+---
+
+## 7. Berechnete Werte mit `expr` direkt ausgeben
+
+Wenn ein Wert nicht nur geprüft, sondern im Text erscheinen soll, ist `{% expr ... %}` die sauberste Lösung.
+
+**Beispiel:**
+
+```typescript
+Heute ist {% expr ("{{current_date}}").weekdayName("de") %}.
+
+```
+
+oder
+
+```typescript
+Vergangen: {% expr ("{{now_iso}}").diffHuman("{{signal_time}}", "yodhm", "de") %}
+
+```
+
+Warum: So bleibt der Prompt lesbar und Rechenlogik sauber getrennt vom Fließtext.
+
+---
+
+## 8. Neue Templates zuerst im Debug-Modus testen
+
+Bevor ein neues Template produktiv verwendet wird, sollte es einmal mit Debug-Ausgabe geprüft werden.
+
+**Empfohlenes Input-Setup:**
+
+```typescript
+{
+  "debug": true,
+  "debug_level": 2,
+  "debug_capture_error": true
+}
+
+```
+
+Warum: So siehst du sofort,
+
+- ob Platzhalter richtig ersetzt wurden,
+
+- ob Bedingungen gültig sind,
+
+- und wie das Template vor dem finalen Cleanup aussah.
+
+---
+
+## 9. Bedingungen nie auf ungesicherte Platzhalter aufbauen
+
+Direkt eingesetzte Platzhalter ohne Schutz können kaputte Ausdrücke erzeugen.
+
+**Riskant:**
+
+```typescript
+{% if {{crew_trust}} > 150 %}
+
+```
+
+Wenn der Wert leer ist, entsteht daraus:
+
+```typescript
+{% if  > 150 %}
+
+```
+
+**Besser:**
+
+```typescript
+{% if ("{{crew_trust}}").toInt() > 150 %}
+
+```
+
+Warum: Die sichere Einbettung verhindert kaputte Syntax.
+
+---
+
+## 10. Lieber lesbare Templates als „clevere“ Templates
+
+Wenn ein Ausdruck zu lang oder zu verschachtelt wird, ist das meist ein Zeichen, dass er vereinfacht werden sollte.
+
+**Besser lesbar:**
+
+```typescript
+{% if ("{{route_locked}}").lower() == "true" %}
+Route gesichert.
+{% endif %}
+
+{% if ("{{crew_trust}}").toInt() > 50 %}
+Crew stabil.
+{% endif %}
+
+```
+
+als ein unnötig überfrachteter Einzeiler.
+
+Warum: Templates werden nicht nur einmal geschrieben, sondern immer wieder gelesen, erweitert und debuggt.
+
+---
+
+Wenn du willst, formuliere ich dir daraus direkt noch einen **kompakten Doku-Kasten** im Stil „Kurzregeln auf einen Blick“.

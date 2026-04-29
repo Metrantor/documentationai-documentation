@@ -1,0 +1,1799 @@
+---
+title: Interpreter-Features
+---
+
+
+---
+
+# AuraWrite Prompt-Script-Interpreter
+
+## Vollständige Syntax- und Funktionsdokumentation
+
+Dieser Interpreter verarbeitet Prompt-Skripte in mehreren Schritten:
+
+1. **Platzhalter werden ersetzt**\
+   Beispiel: `{{crew_trust}}`
+
+2. **Script-Tags werden ausgewertet**\
+   Beispiel: `{% if ("63").toInt() > 50 %}...{% endif %}`
+
+3. **Optional** werden Debug-Informationen erzeugt.
+
+Die Grundidee ist:
+
+- Inhalte über `{{...}}` einfügen
+
+- mit `{% ... %}` Logik steuern
+
+- mit `{% expr ... %}` Werte direkt im Text ausgeben
+
+---
+
+# 1. Grundprinzip
+
+Ein Template kann drei Dinge enthalten:
+
+- normalen Text
+
+- Platzhalter `{{...}}`
+
+- Script-Tags `{% ... %}`
+
+Beispiel:
+
+```typescript
+Du bist ein strukturierter Romanautor.
+
+Crew-Vertrauen: {{crew_trust}}
+
+{% if ("{{crew_trust}}").toInt() > 150 %}
+Das Vertrauen ist hoch.
+{% else %}
+Das Vertrauen ist niedrig.
+{% endif %}
+
+```
+
+Wenn `crew_trust = "63"` ist, wird daraus:
+
+```typescript
+Du bist ein strukturierter Romanautor.
+
+Crew-Vertrauen: 63
+
+Das Vertrauen ist niedrig.
+
+```
+
+---
+
+# 2. Reihenfolge der Verarbeitung
+
+Der Interpreter arbeitet in dieser Reihenfolge:
+
+## Schritt 1: Platzhalter ersetzen
+
+Alle `{{...}}` werden aufgelöst.
+
+## Schritt 2: Script rendern
+
+Danach werden `if`, `switch`, `expr` usw. ausgewertet.
+
+## Schritt 3: optionales Cleanup
+
+Mehrfache Leerzeilen und störende Rest-Whitespace werden bereinigt.
+
+---
+
+# 3. Platzhalter-Syntax
+
+## 3.1 Einfacher Platzhalter
+
+```typescript
+{{crew_trust}}
+
+```
+
+Liefert den kompletten Wert.
+
+Beispiel:
+
+- `crew_trust = "63"`
+
+- Ergebnis: `63`
+
+---
+
+## 3.2 Platzhalter mit `first`
+
+```typescript
+{{history_draft:first:5000}}
+
+```
+
+Liefert maximal die **ersten 5000 Zeichen**.
+
+Beispiel:
+
+- Inhalt ist 12000 Zeichen lang
+
+- Ergebnis: Zeichen 1 bis 5000
+
+---
+
+## 3.3 Platzhalter mit `last`
+
+```typescript
+{{history_draft:last:5000}}
+
+```
+
+Liefert maximal die **letzten 5000 Zeichen**.
+
+Beispiel:
+
+- Inhalt ist 12000 Zeichen lang
+
+- Ergebnis: die letzten 5000 Zeichen
+
+---
+
+## 3.4 Lockere Varianten ohne Zahl
+
+Diese Varianten sind bewusst erlaubt:
+
+```typescript
+{{history_draft:first}}
+{{history_draft:last}}
+
+```
+
+In der aktuellen Definition liefern beide einfach den **gesamten Inhalt**.
+
+Ja, das ist redundant zu:
+
+```typescript
+{{history_draft}}
+
+```
+
+Das ist absichtlich tolerant gehalten.
+
+---
+
+## 3.5 Unterstützte Formen
+
+Erlaubt:
+
+```typescript
+{{name}}
+{{name:first}}
+{{name:last}}
+{{name:first:5000}}
+{{name:last:5000}}
+
+```
+
+Nicht sinnvoll bzw. ungültig:
+
+```typescript
+{{name:middle:100}}
+{{name:first:abc}}
+{{name:first:100:extra}}
+
+```
+
+---
+
+## 3.6 Woher werden Platzhalterwerte gelesen?
+
+Der Interpreter sucht in dieser Reihenfolge:
+
+1. `item.json.parameter`
+
+2. `item.json.parameters`
+
+3. `item.json.context`
+
+4. `item.json`
+
+Das heißt:
+
+```typescript
+{{crew_trust}}
+
+```
+
+findet z. B. den Wert aus:
+
+```typescript
+{
+  "parameter": {
+    "crew_trust": "63"
+  }
+}
+
+```
+
+---
+
+## 3.7 Praktische Tipps zu Platzhaltern
+
+### Gut
+
+```typescript
+{{history_draft:first:5000}}
+
+```
+
+### Gut
+
+```typescript
+{{crew_trust}}
+
+```
+
+### Sehr gut für Bedingungen
+
+```typescript
+{% if ("{{crew_trust}}").toInt() > 150 %}
+...
+{% endif %}
+
+```
+
+### Vorsicht
+
+Wenn ein Platzhalter leer ist und du ihn direkt unquoted in eine Bedingung setzt, kann die Syntax kaputt werden.
+
+Schlecht:
+
+```typescript
+{% if {{crew_trust}} > 150 %}
+
+```
+
+Wenn `crew_trust` leer ist, wird daraus:
+
+```typescript
+{% if  > 150 %}
+
+```
+
+Besser:
+
+```typescript
+{% if ("{{crew_trust}}").toInt() > 150 %}
+
+```
+
+---
+
+# 4. Script-Tags
+
+Script-Tags verwenden diese Form:
+
+```typescript
+{% ... %}
+
+```
+
+Unterstützt werden derzeit:
+
+- `{% if ... %}`
+
+- `{% elseif ... %}`
+
+- `{% else %}`
+
+- `{% endif %}`
+
+- `{% switch ... %}`
+
+- `{% case ... %}`
+
+- `{% default %}`
+
+- `{% endswitch %}`
+
+- `{% expr ... %}`
+
+---
+
+# 5. `if`-Blöcke
+
+## 5.1 Einfaches `if`
+
+```typescript
+{% if BEDINGUNG %}
+Text
+{% endif %}
+
+```
+
+Beispiel:
+
+```typescript
+{% if ("{{crew_trust}}").toInt() > 100 %}
+Crew vertraut uns.
+{% endif %}
+
+```
+
+---
+
+## 5.2 `if / else`
+
+```typescript
+{% if BEDINGUNG %}
+Text A
+{% else %}
+Text B
+{% endif %}
+
+```
+
+Beispiel:
+
+```typescript
+{% if ("{{route_locked}}").lower() == "true" %}
+Route gesichert.
+{% else %}
+Route offen.
+{% endif %}
+
+```
+
+---
+
+## 5.3 `if / elseif / else`
+
+```typescript
+{% if BEDINGUNG_1 %}
+A
+{% elseif BEDINGUNG_2 %}
+B
+{% else %}
+C
+{% endif %}
+
+```
+
+Beispiel:
+
+```typescript
+{% if ("{{crew_trust}}").toInt() > 150 %}
+hoch
+{% elseif ("{{crew_trust}}").toInt() > 80 %}
+mittel
+{% else %}
+niedrig
+{% endif %}
+
+```
+
+---
+
+## 5.4 Praktische Tipps für `if`
+
+### Gut
+
+```typescript
+{% if ("{{value}}").toInt() > 0 %}
+
+```
+
+### Gut
+
+```typescript
+{% if ("{{flag}}").lower() == "true" %}
+
+```
+
+### Gut
+
+```typescript
+{% if ("{{name}}").trim().length() > 0 %}
+
+```
+
+### Eher vermeiden
+
+```typescript
+{% if {{value}} > 0 %}
+
+```
+
+---
+
+# 6. `switch`-Blöcke
+
+## 6.1 Grundform
+
+```typescript
+{% switch AUSDRUCK %}
+{% case AUSDRUCK %}
+...
+{% case AUSDRUCK %}
+...
+{% default %}
+...
+{% endswitch %}
+
+```
+
+---
+
+## 6.2 Beispiel
+
+```typescript
+{% switch ("{{route_locked}}").lower() %}
+{% case "true" %}
+Route gesichert
+{% case "false" %}
+Route offen
+{% default %}
+Route unbekannt
+{% endswitch %}
+
+```
+
+---
+
+## 6.3 Zahlenbeispiel
+
+```typescript
+{% switch ("{{crew_trust}}").toInt() %}
+{% case 10 %}
+niedrig
+{% case 63 %}
+mittel
+{% case 200 %}
+hoch
+{% default %}
+nicht klassifiziert
+{% endswitch %}
+
+```
+
+---
+
+## 6.4 Praktische Tipps für `switch`
+
+`switch` ist ideal, wenn du **einen Wert gegen mehrere feste Fälle** prüfen willst.
+
+Gut geeignet für:
+
+- Statuswerte
+
+- Modi
+
+- Typen
+
+- Kategorien
+
+- bestimmte Zahlenwerte
+
+Nicht ideal für:
+
+- Bereichsprüfungen wie `> 100`
+
+- komplexe Logik
+
+Dafür ist `if` besser.
+
+---
+
+# 7. `expr`-Ausgabe
+
+## 7.1 Grundform
+
+```typescript
+{% expr AUSDRUCK %}
+
+```
+
+Der Ausdruck wird ausgewertet und **direkt als Text eingefügt**.
+
+---
+
+## 7.2 Beispiele
+
+### Wochentag ausgeben
+
+```typescript
+Heute ist {% expr ("2025-01-06").weekdayName("de") %}.
+
+```
+
+Ergebnis:
+
+```typescript
+Heute ist Montag.
+
+```
+
+### Datumsdifferenz ausgeben
+
+```typescript
+Vergangen: {% expr ("2025-01-10T12:00:00Z").diffHuman("2025-01-01T10:30:00Z", "yodhm", "de") %}
+
+```
+
+### Zahl ausgeben
+
+```typescript
+Wert: {% expr ("{{crew_trust}}").toInt() + 10 %}
+
+```
+
+---
+
+## 7.3 Praktische Tipps für `expr`
+
+`expr` ist ideal, wenn du nicht nur entscheiden willst, **ob** etwas erscheint, sondern **welcher berechnete Wert** im Text stehen soll.
+
+Typische Einsätze:
+
+- Wochentage
+
+- Datumsdifferenzen
+
+- formatierte Zeitspannen
+
+- einfache berechnete Zahlen
+
+- normierte Textwerte
+
+---
+
+# 8. Ausdruckssprache
+
+Die Ausdruckssprache wird in `if`, `elseif`, `switch`, `case` und `expr` verwendet.
+
+---
+
+# 9. Literale
+
+Unterstützt werden:
+
+## Strings
+
+```typescript
+"abc"
+'abc'
+
+```
+
+## Zahlen
+
+```typescript
+123
+12.5
+-5
+
+```
+
+## Booleans
+
+```typescript
+true
+false
+
+```
+
+## Null
+
+```typescript
+null
+
+```
+
+---
+
+# 10. Operatoren
+
+## 10.1 Vergleich
+
+- `==`
+
+- `!=`
+
+- `>`
+
+- `<`
+
+- `>=`
+
+- `<=`
+
+Beispiele:
+
+```typescript
+"abc" == "abc"
+5 > 3
+10 <= 20
+
+```
+
+---
+
+## 10.2 Rechnen
+
+- `+`
+
+- `-`
+
+- `*`
+
+- `/`
+
+Beispiele:
+
+```typescript
+1 + 2
+10 - 3
+5 * 4
+20 / 5
+
+```
+
+---
+
+## 10.3 Unary-Operatoren
+
+- `+`
+
+- `-`
+
+- `!`
+
+- `not`
+
+Beispiele:
+
+```typescript
+-5
++12
+!true
+not false
+
+```
+
+---
+
+# 11. Logische Ausdrücke
+
+Neu unterstützt:
+
+- `and`
+
+- `or`
+
+- `not`
+
+Zusätzlich bleibt `!` erlaubt.
+
+---
+
+## 11.1 `and`
+
+```typescript
+{% if A and B %}
+...
+{% endif %}
+
+```
+
+Beispiel:
+
+```typescript
+{% if ("{{route_locked}}").lower() == "true" and ("{{crew_trust}}").toInt() > 50 %}
+Route gesichert und Vertrauen ausreichend.
+{% endif %}
+
+```
+
+---
+
+## 11.2 `or`
+
+```typescript
+{% if A or B %}
+...
+{% endif %}
+
+```
+
+Beispiel:
+
+```typescript
+{% if ("{{ilyr_cipher}}").upper() == "AUR" or ("{{nexus_trace}}").toInt() > 8 %}
+Trigger aktiv.
+{% endif %}
+
+```
+
+---
+
+## 11.3 `not`
+
+```typescript
+{% if not A %}
+...
+{% endif %}
+
+```
+
+Beispiel:
+
+```typescript
+{% if not (("{{market_debt}}").lower() == "true") %}
+Keine Marktschuld aktiv.
+{% endif %}
+
+```
+
+---
+
+## 11.4 `!`
+
+```typescript
+{% if !A %}
+...
+{% endif %}
+
+```
+
+Beispiel:
+
+```typescript
+{% if !("{{route_locked}}").lower() == "true" %}
+Route ist nicht gesichert.
+{% endif %}
+
+```
+
+Für Lesbarkeit ist `not` meist besser.
+
+---
+
+## 11.5 Operator-Priorität
+
+Der Interpreter wertet grob in dieser Reihenfolge:
+
+1. Klammern / Literale / Methoden
+
+2. Unary: `+`, `-`, `!`, `not`
+
+3. `*`, `/`
+
+4. `+`, `-`
+
+5. Vergleiche: `==`, `!=`, `>`, `<`, `>=`, `<=`
+
+6. `and`
+
+7. `or`
+
+### Empfehlung
+
+Bei komplexeren Bedingungen immer Klammern setzen.
+
+Gut:
+
+```typescript
+{% if (("{{route_locked}}").lower() == "true" and ("{{crew_trust}}").toInt() > 50) or ("{{nexus_trace}}").toInt() > 8 %}
+...
+{% endif %}
+
+```
+
+---
+
+# 12. Klammern
+
+Klammern sind erlaubt und empfohlen.
+
+Beispiele:
+
+```typescript
+("123").toInt() + 10
+(("10").toInt() + 5) * 2
+not (("{{flag}}").lower() == "true")
+
+```
+
+---
+
+# 13. Unterstützte String-/Zahl-Funktionen
+
+Diese Funktionen können als Methoden auf Literalen oder Ergebniswerten verwendet werden.
+
+---
+
+## 13.1 `toInt()`
+
+Wandelt in eine Ganzzahl um.
+
+```typescript
+("123").toInt()
+
+```
+
+Ergebnis:
+
+```typescript
+123
+
+```
+
+Beispiel:
+
+```typescript
+{% if ("{{crew_trust}}").toInt() > 150 %}
+hoch
+{% endif %}
+
+```
+
+---
+
+## 13.2 `toFloat()`
+
+Wandelt in eine Fließkommazahl um.
+
+```typescript
+("12.5").toFloat()
+
+```
+
+Ergebnis:
+
+```typescript
+12.5
+
+```
+
+---
+
+## 13.3 `length()`
+
+Länge eines Strings.
+
+```typescript
+("Kirk").length()
+
+```
+
+Ergebnis:
+
+```typescript
+4
+
+```
+
+Beispiel:
+
+```typescript
+{% if ("{{codex_context}}").length() > 0 %}
+Codex vorhanden
+{% endif %}
+
+```
+
+---
+
+## 13.4 `trim()`
+
+Entfernt führende und abschließende Leerzeichen.
+
+```typescript
+("  abc  ").trim()
+
+```
+
+Ergebnis:
+
+```typescript
+abc
+
+```
+
+---
+
+## 13.5 `upper()`
+
+Großschreibung.
+
+```typescript
+("aur").upper()
+
+```
+
+Ergebnis:
+
+```typescript
+AUR
+
+```
+
+---
+
+## 13.6 `lower()`
+
+Kleinschreibung.
+
+```typescript
+("AUR").lower()
+
+```
+
+Ergebnis:
+
+```typescript
+aur
+
+```
+
+---
+
+# 14. Datums- und Zeitfunktionen
+
+Diese Funktionen erwarten einen Datumswert, typischerweise als ISO-String.
+
+Empfohlen:
+
+```typescript
+"2025-01-10T12:00:00Z"
+"2025-01-10"
+
+```
+
+---
+
+## 14.1 `toDateIso()`
+
+Normalisiert ein Datum als ISO-String.
+
+```typescript
+("2025-01-10").toDateIso()
+
+```
+
+Beispielausgabe:
+
+```typescript
+2025-01-10T00:00:00.000Z
+
+```
+
+---
+
+## 14.2 `toMillis()`
+
+Millisekunden seit Unix-Epoche.
+
+```typescript
+("2025-01-10T00:00:00Z").toMillis()
+
+```
+
+---
+
+## 14.3 `toUnix()`
+
+Sekunden seit Unix-Epoche.
+
+```typescript
+("2025-01-10T00:00:00Z").toUnix()
+
+```
+
+---
+
+## 14.4 `diff(other, unit)`
+
+Differenz zwischen zwei Zeitpunkten in einer Einheit.
+
+### Unterstützte Units
+
+- `"ms"`
+
+- `"seconds"`
+
+- `"minutes"`
+
+- `"hours"`
+
+- `"days"`
+
+- `"weeks"`
+
+- `"months"`
+
+- `"years"`
+
+Hinweis:
+
+- Wochen und kleiner werden als feste Zeitspannen gerechnet
+
+- Monate und Jahre werden kalenderbezogen gerechnet
+
+Beispiel:
+
+```typescript
+("2025-01-10T12:00:00Z").diff("2025-01-01T12:00:00Z", "days")
+
+```
+
+Ergebnis:
+
+```typescript
+9
+
+```
+
+Beispiel mit Monaten:
+
+```typescript
+("2025-05-10T12:00:00Z").diff("2025-01-10T12:00:00Z", "months")
+
+```
+
+Ergebnis:
+
+```typescript
+4
+
+```
+
+Beispiel mit Jahren:
+
+```typescript
+("2027-01-10T12:00:00Z").diff("2025-01-10T12:00:00Z", "years")
+
+```
+
+Ergebnis:
+
+```typescript
+2
+
+```
+
+---
+
+## 14.5 `diffHuman(other, mask?, locale?)`
+
+Liefert eine menschenlesbare Dauer.
+
+### Signatur
+
+```typescript
+diffHuman(other, mask?, locale?)
+
+```
+
+### Parameter
+
+- `other` → Vergleichsdatum
+
+- `mask` → welche Teile ausgegeben werden
+
+- `locale` → `"de"` oder `"en"`
+
+### Masken
+
+Bei `diffHuman()` gelten:
+
+- `y` = Jahre
+
+- `o` = Monate
+
+- `w` = Wochen
+
+- `d` = Tage
+
+- `h` = Stunden
+
+- `m` = Minuten
+
+- `s` = Sekunden
+
+Wichtig:\
+`o`**&#x20;steht für Monate**, weil `m` bereits Minuten ist.
+
+---
+
+### Beispiele für Masken
+
+- `"yowdhms"` → Jahre, Monate, Wochen, Tage, Stunden, Minuten, Sekunden
+
+- `"yod"` → Jahre, Monate, Tage
+
+- `"dhm"` → Tage, Stunden, Minuten
+
+- `"hms"` → Stunden, Minuten, Sekunden
+
+- `"w"` → nur Wochen
+
+- `"y"` → nur Jahre
+
+Beispiel:
+
+```typescript
+{% expr ("2027-05-10T12:00:00Z").diffHuman("2025-01-01T10:30:00Z", "yodhm", "de") %}
+
+```
+
+Mögliche Ausgabe:
+
+```typescript
+2 Jahre, 4 Monate, 9 Tage, 1 Stunde, 30 Minuten
+
+```
+
+---
+
+## 14.6 `add(amount, unit)`
+
+Addiert Zeit auf ein Datum und liefert einen ISO-String zurück.
+
+### Unterstützte Units
+
+- `"ms"`
+
+- `"seconds"`
+
+- `"minutes"`
+
+- `"hours"`
+
+- `"days"`
+
+- `"weeks"`
+
+- `"months"`
+
+- `"years"`
+
+Bei Monaten und Jahren wird kalenderbezogen gerechnet.
+
+Beispiel:
+
+```typescript
+("2025-01-01T00:00:00Z").add(14, "days")
+
+```
+
+Beispiel in Bedingung:
+
+```typescript
+{% if ("2025-01-01T00:00:00Z").add(14, "days").weekdayName("de") == "Mittwoch" %}
+zwei Wochen später ist Mittwoch
+{% endif %}
+
+```
+
+Beispiel mit Monaten:
+
+```typescript
+{% expr ("2025-01-31T00:00:00Z").add(1, "months") %}
+
+```
+
+Das liefert ein kalenderlogisch angepasstes Datum zurück.
+
+---
+
+## 14.7 `weekday()`
+
+Wochentag als Zahl, mit:
+
+- Montag = 1
+
+- Dienstag = 2
+
+- Mittwoch = 3
+
+- Donnerstag = 4
+
+- Freitag = 5
+
+- Samstag = 6
+
+- Sonntag = 7
+
+Beispiel:
+
+```typescript
+("2025-01-06").weekday()
+
+```
+
+Ergebnis:
+
+```typescript
+1
+
+```
+
+---
+
+## 14.8 `weekdayName(locale?, style?)`
+
+Wochentagsname als Text.
+
+### Parameter
+
+- `locale`: `"de"` oder `"en"`
+
+- `style`: `"long"` oder `"short"`
+
+Beispiele:
+
+```typescript
+("2025-01-06").weekdayName("de")
+("2025-01-06").weekdayName("de", "short")
+("2025-01-06").weekdayName("en")
+
+```
+
+Mögliche Ergebnisse:
+
+- `Montag`
+
+- `Mo`
+
+- `Monday`
+
+---
+
+# 15. Praktische Datums-Tipps
+
+## Gut
+
+```typescript
+"2025-01-10T12:00:00Z"
+
+```
+
+## Auch gut
+
+```typescript
+"2025-01-10"
+
+```
+
+## Weniger gut
+
+```typescript
+"10.01.2025"
+
+```
+
+oder andere lokale Formate.
+
+Am robustesten sind ISO-Daten.
+
+---
+
+# 16. Typische Praxisbeispiele
+
+## 16.1 Zahlenwert klassifizieren
+
+```typescript
+Crew-Vertrauen ist {% if ("{{crew_trust}}").toInt() > 150 %}hoch{% elseif ("{{crew_trust}}").toInt() > 80 %}mittel{% else %}niedrig{% endif %}.
+
+```
+
+---
+
+## 16.2 Boolean-artige Strings prüfen
+
+```typescript
+{% if ("{{route_locked}}").trim().lower() == "true" %}
+Route gesichert.
+{% else %}
+Route nicht gesichert.
+{% endif %}
+
+```
+
+---
+
+## 16.3 Mehrere Bedingungen kombinieren
+
+```typescript
+{% if ("{{route_locked}}").lower() == "true" and ("{{crew_trust}}").toInt() > 50 %}
+Route gesichert und Crew stabil.
+{% endif %}
+
+```
+
+---
+
+## 16.4 Alternative Bedingungen
+
+```typescript
+{% if ("{{ilyr_cipher}}").upper() == "AUR" or ("{{nexus_trace}}").toInt() > 8 %}
+Signal aktiv.
+{% endif %}
+
+```
+
+---
+
+## 16.5 Negation
+
+```typescript
+{% if not (("{{market_debt}}").lower() == "true") %}
+Keine Marktschuld aktiv.
+{% endif %}
+
+```
+
+---
+
+## 16.6 Wochentag direkt ausgeben
+
+```typescript
+Ankunftstag: {% expr ("{{arrival_date}}").weekdayName("de") %}
+
+```
+
+---
+
+## 16.7 Tage seit Ereignis berechnen
+
+```typescript
+Seit dem letzten Signal sind {% expr ("{{now_iso}}").diff("{{signal_time}}", "days") %} Tage vergangen.
+
+```
+
+---
+
+## 16.8 Menschliche Zeitspanne ausgeben
+
+```typescript
+Vergangen: {% expr ("{{now_iso}}").diffHuman("{{signal_time}}", "yodhm", "de") %}
+
+```
+
+---
+
+## 16.9 Lange Texte begrenzen
+
+```typescript
+Bisheriger Verlauf:
+{{current_chapter_draft_before_beat:last:5000}}
+
+```
+
+Das ist besonders nützlich für:
+
+- Kapitel-Drafts
+
+- Verlaufshistorien
+
+- Codex-Text
+
+- Summaries
+
+---
+
+# 17. Fehlerquellen und Best Practices
+
+## 17.1 Werte in Bedingungen immer sicher einbetten
+
+### Eher riskant
+
+```typescript
+{% if {{crew_trust}} > 100 %}
+
+```
+
+### Besser
+
+```typescript
+{% if ("{{crew_trust}}").toInt() > 100 %}
+
+```
+
+---
+
+## 17.2 Strings normalisieren
+
+Wenn du Wahrheitswerte oder Status prüfst:
+
+### Gut
+
+```typescript
+{% if ("{{route_locked}}").trim().lower() == "true" %}
+
+```
+
+Dadurch bist du robuster gegen:
+
+- `TRUE`
+
+- `true`
+
+- `True`
+
+---
+
+## 17.3 Leere Texte prüfen
+
+```typescript
+{% if ("{{codex_context}}").trim().length() > 0 %}
+Codex vorhanden
+{% endif %}
+
+```
+
+Das ist robuster als einfache Textannahmen.
+
+---
+
+## 17.4 Bei Datum immer ISO bevorzugen
+
+Gut:
+
+```typescript
+"2025-01-10T12:00:00Z"
+
+```
+
+Nicht ideal:
+
+```typescript
+"10.01.2025 13:00"
+
+```
+
+---
+
+## 17.5 Für große Texte gezielt kürzen
+
+Wenn du LLM-Kontext sparen willst:
+
+```typescript
+{{history_draft:last:5000}}
+
+```
+
+oder
+
+```typescript
+{{super_codex:first:8000}}
+
+```
+
+Das ist oft deutlich besser als blind alles einzusetzen.
+
+---
+
+## 17.6 Bei komplexer Logik Klammern setzen
+
+Auch wenn der Interpreter Prioritäten kennt, sind Klammern für Lesbarkeit Gold wert.
+
+Empfohlen:
+
+```typescript
+{% if (("{{route_locked}}").lower() == "true" and ("{{crew_trust}}").toInt() > 50) or ("{{nexus_trace}}").toInt() > 8 %}
+...
+{% endif %}
+
+```
+
+---
+
+# 18. Debug-Modus
+
+Der Interpreter unterstützt optional einen Debug-Modus.
+
+Dieser ist dafür da, die drei wichtigsten Fragen sichtbar zu machen:
+
+- Wurden Platzhalter richtig ersetzt?
+
+- Ist danach gültige Script-Syntax entstanden?
+
+- Was kam vor und nach dem Rendern konkret heraus?
+
+---
+
+## 18.1 Aktivierung
+
+Im Input-JSON:
+
+```typescript
+{
+  "debug": true,
+  "debug_level": 2
+}
+
+```
+
+Optional zusätzlich:
+
+```typescript
+{
+  "debug_capture_error": true
+}
+
+```
+
+---
+
+## 18.2 Debug-Level 1
+
+Liefert:
+
+- `template_original`
+
+- `template_after_placeholders`
+
+Das ist der wichtigste Minimalmodus.
+
+Du siehst damit sofort:
+
+- was ursprünglich in der DB stand
+
+- was nach der Platzhalterersetzung übrig blieb
+
+---
+
+## 18.3 Debug-Level 2
+
+Zusätzlich zu Level 1:
+
+- `placeholders`
+
+- `tags`
+
+- `rendered_before_cleanup`
+
+Damit siehst du:
+
+- welche Platzhalter gefunden wurden
+
+- welche Tags geparst wurden
+
+- wie der Output vor Cleanup aussah
+
+---
+
+## 18.4 Debug-Level 3
+
+Zusätzlich zu Level 2:
+
+- `ast_summary`
+
+- `rendered_after_cleanup`
+
+Damit bekommst du noch eine kompakte Übersicht über die Struktur des Templates.
+
+---
+
+## 18.5 Fehler nicht werfen, sondern zurückgeben
+
+Wenn `debug_capture_error = true` gesetzt ist, bricht der Node bei Fehlern nicht hart ab, sondern gibt ein Fehlerobjekt zurück.
+
+Beispiel:
+
+```typescript
+{
+  "rendered": null,
+  "error": {
+    "message": "Fehler in if-Bedingung \"> 150\": Ungültiger Ausdruck \"> 150\": Linker Operand fehlt"
+  }
+}
+
+```
+
+Das ist sehr praktisch für Test- und Diagnosezwecke.
+
+---
+
+## 18.6 Wann solltest du Debug einschalten?
+
+### Beim Bau neuer Templates
+
+um sofort zu sehen, ob Bedingungen und Platzhalter sauber arbeiten.
+
+### Bei Produktionsfehlern
+
+um festzustellen, ob:
+
+- ein Platzhalter leer war
+
+- eine Bedingung kaputt wurde
+
+- ein falscher Typ entstanden ist
+
+### Beim Feintuning von langen Prompt-Skripten
+
+um zu kontrollieren, welche Teile wirklich im finalen Prompt landen.
+
+---
+
+# 19. Was derzeit nicht unterstützt wird
+
+Aktuell nicht vorgesehen:
+
+- freie JavaScript-Ausdrücke
+
+- Variablennamen direkt in Ausdrücken ohne Platzhalterersetzung
+
+- eigene benutzerdefinierte Funktionen
+
+- Arrays / Schleifen
+
+- Objekte im Ausdruck
+
+- komplexe Makro-Systeme
+
+- beliebige Kalenderlogik jenseits der eingebauten Datumsfunktionen
+
+Das ist Absicht, damit der Interpreter in n8n stabil bleibt.
+
+---
+
+# 20. Empfohlene Schreibweise
+
+## Für numerische Vergleiche
+
+```typescript
+{% if ("{{value}}").toInt() > 10 %}
+
+```
+
+## Für Textvergleiche
+
+```typescript
+{% if ("{{mode}}").lower() == "rewrite" %}
+
+```
+
+## Für kombinierte Logik
+
+```typescript
+{% if ("{{route_locked}}").lower() == "true" and ("{{crew_trust}}").toInt() > 50 %}
+
+```
+
+## Für Negation
+
+```typescript
+{% if not (("{{market_debt}}").lower() == "true") %}
+
+```
+
+## Für Datum
+
+```typescript
+{% if ("{{now_iso}}").diff("{{created_at}}", "days") > 7 %}
+
+```
+
+## Für direkte Ausgabe
+
+```typescript
+{% expr ("{{event_date}}").weekdayName("de") %}
+
+```
+
+## Für große Texte
+
+```typescript
+{{history_draft:last:5000}}
+
+```
+
+---
+
+# 21. Mini-Cheat-Sheet
+
+## Platzhalter
+
+```typescript
+{{name}}
+{{name:first:5000}}
+{{name:last:5000}}
+
+```
+
+## If
+
+```typescript
+{% if BEDINGUNG %}...{% endif %}
+{% if BEDINGUNG %}...{% else %}...{% endif %}
+{% if A %}...{% elseif B %}...{% else %}...{% endif %}
+
+```
+
+## Switch
+
+```typescript
+{% switch WERT %}
+{% case X %}...{% case Y %}...{% default %}...{% endswitch %}
+
+```
+
+## Expr
+
+```typescript
+{% expr AUSDRUCK %}
+
+```
+
+## Logik
+
+```typescript
+A and B
+A or B
+not A
+!A
+
+```
+
+## Funktionen
+
+```typescript
+.toInt()
+.toFloat()
+.length()
+.trim()
+.upper()
+.lower()
+.toDateIso()
+.toMillis()
+.toUnix()
+.diff(other, unit)
+.diffHuman(other, mask?, locale?)
+.add(amount, unit)
+.weekday()
+.weekdayName(locale?, style?)
+
+```
+
+## `diffHuman`-Masken
+
+```typescript
+y = Jahre
+o = Monate
+w = Wochen
+d = Tage
+h = Stunden
+m = Minuten
+s = Sekunden
+
+```
+
+---
+
+# 22. Empfehlung für deine Praxis in AuraWrite
+
+Ich würde deine Templates so aufbauen:
+
+- normale Inhaltsblöcke über `{{...}}`
+
+- große Textmengen immer mit `first` oder `last` begrenzen
+
+- numerische Werte in Bedingungen immer über `.toInt()` oder `.toFloat()`
+
+- Statuswerte über `.trim().lower()`
+
+- Datumslogik nur mit ISO-Strings
+
+- direkte berechnete Ausgabe über `{% expr ... %}`
+
+- bei komplexeren Bedingungen immer Klammern
+
+- Debug-Modus bei neuen oder auffälligen Templates standardmäßig kurz mitlaufen lassen
+
+So bleibt das System stabil, lesbar und praxistauglich.
+
+Wenn du willst, kommt als Nächstes die **finale Debug-fähige Endfassung des Interpreters** noch einmal sauber in einem Block.

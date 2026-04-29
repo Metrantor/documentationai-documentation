@@ -504,6 +504,27 @@
                     "path": "inhalte-eines-prompts"
                   }
                 ]
+              },
+              {
+                "group": "Prompt-Interpreter",
+                "pages": [
+                  {
+                    "title": "Tipps und Tricks",
+                    "path": "tipps-und-tricks"
+                  },
+                  {
+                    "title": "Interpreter Features",
+                    "path": "interpreter-features"
+                  },
+                  {
+                    "title": "Interpreter Code",
+                    "path": "interpreter-code"
+                  },
+                  {
+                    "title": "Debug-fähige Endfassung des Interpreters",
+                    "path": "debug-fhige-endfassung-des-interpreters"
+                  }
+                ]
               }
             ]
           },

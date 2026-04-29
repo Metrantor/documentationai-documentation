@@ -1,0 +1,1446 @@
+Hier ist die **finale Debug-fähige Endfassung** des Interpreters als kompletter n8n-Code-Node.
+
+Sie enthält:
+
+- Platzhalter `{{...}}`
+
+- Placeholder-Slicing `first/last`
+
+- `{% if %}`, `{% elseif %}`, `{% else %}`, `{% endif %}`
+
+- `{% switch %}`, `{% case %}`, `{% default %}`, `{% endswitch %}`
+
+- `{% expr ... %}`
+
+- Rechenoperatoren
+
+- `and`, `or`, `not`, `!`
+
+- Stringfunktionen
+
+- Datumsfunktionen
+
+- `diffHuman()` mit Jahren und Monaten
+
+- Debug-Level 1–3
+
+- optional `debug_capture_error`
+
+
+
+Die normale Fassung und die Debug-Fassung unterscheiden sich nicht in der eigentlichen Renderlogik, sondern vor allem darin, was sie zusätzlich sichtbar macht: Die normale Fassung nimmt dein Template, ersetzt Platzhalter, wertet Script-Tags aus und gibt nur das finale `rendered` zurück; die Debug-Fassung macht intern denselben Job, liefert aber je nach `debug_level` zusätzliche Zwischenstände wie `template_original`, `template_after_placeholders`, gefundene Platzhalter, erkannte Tags, `rendered_before_cleanup`, eine AST-Zusammenfassung und auf Wunsch strukturiertere Fehlersicht zurück. Standardmäßig würde ich die Debug-Fassung trotzdem nicht dauerhaft „voll eingeschaltet“ nutzen, weil sie mehr Daten erzeugt, große Textinhalte und Zwischenstände mit durchschleppt, Ergebnisse unnötig aufbläht, bei langen Prompt-Kontexten Speicher und Übersicht frisst und im produktiven Flow eher Rauschen als Nutzen produziert; als technische Basis kannst du sie aber sehr gut überall verwenden und Debug einfach standardmäßig **aus** lassen, dann hast du nur minimalen Overhead und kannst bei Bedarf gezielt aufdrehen.
+
+
+
+```typescript
+function resolvePath(obj, path) {
+  if (!obj || !path) return undefined;
+  return String(path).split('.').reduce((acc, key) => {
+    if (acc == null) return undefined;
+    return acc[key];
+  }, obj);
+}
+
+function stringifyValue(value) {
+  if (value == null) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (value instanceof Date) return value.toISOString();
+
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+// --------------------------------------------------
+// Placeholder handling
+// --------------------------------------------------
+function sliceByChars(value, mode = null, count = null) {
+  const str = stringifyValue(value);
+  const chars = Array.from(str);
+
+  if (!mode) return str;
+
+  const normalizedMode = String(mode).toLowerCase();
+  const limit = count == null || count === '' ? null : Number(count);
+
+  if (limit != null && (!Number.isFinite(limit) || limit < 0)) {
+    throw new Error(`Ungültiger Slice-Wert: ${count}`);
+  }
+
+  if (normalizedMode === 'first') {
+    return limit == null ? str : chars.slice(0, limit).join('');
+  }
+
+  if (normalizedMode === 'last') {
+    return limit == null ? str : chars.slice(Math.max(chars.length - limit, 0)).join('');
+  }
+
+  throw new Error(`Unbekannter Placeholder-Modus: ${mode}`);
+}
+
+function resolvePlaceholderValue(name, itemJson) {
+  const sources = [
+    itemJson.parameter,
+    itemJson.parameters,
+    itemJson.context,
+    itemJson,
+  ];
+
+  for (const source of sources) {
+    const value = resolvePath(source, name);
+    if (value !== undefined) {
+      return { value, sourceFound: true };
+    }
+  }
+
+  return { value: '', sourceFound: false };
+}
+
+function replacePlaceholders(template, itemJson, debug = null) {
+  return String(template).replace(/{{\s*([^{}]+?)\s*}}/g, (fullMatch, inner) => {
+    const raw = String(inner).trim();
+
+    const parts = raw.split(':').map(x => x.trim()).filter(x => x.length > 0);
+    if (parts.length === 0) {
+      return '';
+    }
+
+    const name = parts[0];
+    let mode = null;
+    let count = null;
+
+    if (parts.length >= 2) {
+      const maybeMode = parts[1].toLowerCase();
+      if (maybeMode === 'first' || maybeMode === 'last') {
+        mode = maybeMode;
+      } else {
+        throw new Error(`Ungültige Placeholder-Syntax: ${fullMatch}`);
+      }
+    }
+
+    if (parts.length >= 3) {
+      count = parts[2];
+    }
+
+    if (parts.length > 3) {
+      throw new Error(`Zu viele Placeholder-Parameter: ${fullMatch}`);
+    }
+
+    const resolved = resolvePlaceholderValue(name, itemJson);
+    const finalValue = sliceByChars(resolved.value, mode, count);
+
+    if (debug) {
+      debug.placeholders.push({
+        raw: fullMatch,
+        name,
+        mode,
+        count: count == null ? null : Number(count),
+        sourceFound: resolved.sourceFound,
+        originalLength: stringifyValue(resolved.value).length,
+        resolvedLength: stringifyValue(finalValue).length,
+        preview: stringifyValue(finalValue).slice(0, 200),
+      });
+    }
+
+    return finalValue;
+  });
+}
+
+// --------------------------------------------------
+// Template tokenizer
+// --------------------------------------------------
+function tokenizeTemplate(template) {
+  const regex = /{%\s*([\s\S]*?)\s*%}/g;
+  const tokens = [];
+  let lastIndex = 0;
+  let match;
+
+  while ((match = regex.exec(template)) !== null) {
+    if (match.index > lastIndex) {
+      tokens.push({
+        type: 'TEXT',
+        value: template.slice(lastIndex, match.index),
+      });
+    }
+
+    tokens.push({
+      type: 'TAG',
+      value: match[1].trim(),
+      raw: match[0],
+    });
+
+    lastIndex = regex.lastIndex;
+  }
+
+  if (lastIndex < template.length) {
+    tokens.push({
+      type: 'TEXT',
+      value: template.slice(lastIndex),
+    });
+  }
+
+  return tokens;
+}
+
+// --------------------------------------------------
+// Expression tokenizer
+// --------------------------------------------------
+function tokenizeExpr(input) {
+  const tokens = [];
+  let i = 0;
+
+  const isWhitespace = ch => /\s/.test(ch);
+  const isDigit = ch => /[0-9]/.test(ch);
+  const isIdentifierStart = ch => /[A-Za-z_]/.test(ch);
+  const isIdentifierPart = ch => /[A-Za-z0-9_]/.test(ch);
+
+  while (i < input.length) {
+    const ch = input[i];
+
+    if (isWhitespace(ch)) {
+      i++;
+      continue;
+    }
+
+    if (ch === '"' || ch === "'") {
+      const quote = ch;
+      i++;
+      let value = '';
+      let closed = false;
+
+      while (i < input.length) {
+        const c = input[i];
+
+        if (c === '\\') {
+          i++;
+          if (i < input.length) {
+            value += input[i];
+            i++;
+          }
+          continue;
+        }
+
+        if (c === quote) {
+          i++;
+          closed = true;
+          break;
+        }
+
+        value += c;
+        i++;
+      }
+
+      if (!closed) {
+        throw new Error('String-Literal nicht geschlossen');
+      }
+
+      tokens.push({ type: 'STRING', value });
+      continue;
+    }
+
+    if (isDigit(ch) || (ch === '.' && isDigit(input[i + 1]))) {
+      const start = i;
+      let seenDot = false;
+
+      if (ch === '.') seenDot = true;
+      i++;
+
+      while (i < input.length) {
+        const c = input[i];
+        if (c === '.') {
+          if (seenDot) break;
+          seenDot = true;
+          i++;
+          continue;
+        }
+        if (!/[0-9]/.test(c)) break;
+        i++;
+      }
+
+      const raw = input.slice(start, i);
+      const num = Number(raw);
+
+      if (Number.isNaN(num)) {
+        throw new Error(`Ungültige Zahl: ${raw}`);
+      }
+
+      tokens.push({ type: 'NUMBER', value: num });
+      continue;
+    }
+
+    const two = input.slice(i, i + 2);
+    if (['==', '!=', '>=', '<='].includes(two)) {
+      tokens.push({ type: 'OP', value: two });
+      i += 2;
+      continue;
+    }
+
+    if ('+-*/()<>.,!'.includes(ch)) {
+      tokens.push({ type: ch, value: ch });
+      i++;
+      continue;
+    }
+
+    if (isIdentifierStart(ch)) {
+      const start = i;
+      i++;
+      while (i < input.length && isIdentifierPart(input[i])) i++;
+      const word = input.slice(start, i);
+
+      if (word === 'true') {
+        tokens.push({ type: 'BOOLEAN', value: true });
+      } else if (word === 'false') {
+        tokens.push({ type: 'BOOLEAN', value: false });
+      } else if (word === 'null') {
+        tokens.push({ type: 'NULL', value: null });
+      } else if (word === 'and') {
+        tokens.push({ type: 'LOGIC', value: 'and' });
+      } else if (word === 'or') {
+        tokens.push({ type: 'LOGIC', value: 'or' });
+      } else if (word === 'not') {
+        tokens.push({ type: 'LOGIC', value: 'not' });
+      } else {
+        tokens.push({ type: 'IDENT', value: word });
+      }
+      continue;
+    }
+
+    throw new Error(`Unbekanntes Zeichen im Ausdruck: ${ch}`);
+  }
+
+  return tokens;
+}
+
+// --------------------------------------------------
+// Expression parser
+// --------------------------------------------------
+function parseExpression(input) {
+  const expr = String(input ?? '').trim();
+
+  if (!expr) {
+    throw new Error('Leerer Ausdruck');
+  }
+
+  if (/^(==|!=|>=|<=|>|<|\+|-|\*|\/|and\b|or\b)/.test(expr)) {
+    throw new Error('Linker Operand fehlt');
+  }
+
+  if (/(==|!=|>=|<=|>|<|\+|-|\*|\/|and|or)$/.test(expr)) {
+    throw new Error('Rechter Operand fehlt');
+  }
+
+  const tokens = tokenizeExpr(expr);
+  let pos = 0;
+
+  function peek(...typesOrValues) {
+    const t = tokens[pos];
+    if (!t) return false;
+    return typesOrValues.some(x => t.type === x || t.value === x);
+  }
+
+  function consume(expectedTypeOrValue = null) {
+    const t = tokens[pos];
+    if (!t) {
+      throw new Error('Unerwartetes Ende des Ausdrucks');
+    }
+
+    if (
+      expectedTypeOrValue &&
+      t.type !== expectedTypeOrValue &&
+      t.value !== expectedTypeOrValue
+    ) {
+      throw new Error(`Erwartet: ${expectedTypeOrValue}, gefunden: ${t.type}:${t.value}`);
+    }
+
+    pos++;
+    return t;
+  }
+
+  function parsePrimary() {
+    if (peek('STRING')) return { type: 'Literal', value: consume('STRING').value };
+    if (peek('NUMBER')) return { type: 'Literal', value: consume('NUMBER').value };
+    if (peek('BOOLEAN')) return { type: 'Literal', value: consume('BOOLEAN').value };
+    if (peek('NULL')) return { type: 'Literal', value: consume('NULL').value };
+
+    if (peek('IDENT')) {
+      const ident = consume('IDENT').value;
+      throw new Error(`Unbekannter Identifier "${ident}". Es sind nur Literale und Funktionen erlaubt.`);
+    }
+
+    if (peek('(')) {
+      consume('(');
+      const exprNode = parseOr();
+      consume(')');
+      return exprNode;
+    }
+
+    throw new Error('Ungültiger Ausdruck');
+  }
+
+  function parsePostfix() {
+    let node = parsePrimary();
+
+    while (peek('.')) {
+      consume('.');
+      const identToken = consume('IDENT');
+      const method = identToken.value;
+
+      consume('(');
+      const args = [];
+
+      if (!peek(')')) {
+        args.push(parseOr());
+        while (peek(',')) {
+          consume(',');
+          args.push(parseOr());
+        }
+      }
+
+      consume(')');
+
+      node = {
+        type: 'Call',
+        callee: method,
+        target: node,
+        args,
+      };
+    }
+
+    return node;
+  }
+
+  function parseUnary() {
+    if (peek('+')) {
+      consume('+');
+      return { type: 'Unary', op: '+', expr: parseUnary() };
+    }
+
+    if (peek('-')) {
+      consume('-');
+      return { type: 'Unary', op: '-', expr: parseUnary() };
+    }
+
+    if (peek('!')) {
+      consume('!');
+      return { type: 'Unary', op: '!', expr: parseUnary() };
+    }
+
+    if (peek('LOGIC') && tokens[pos].value === 'not') {
+      consume('LOGIC');
+      return { type: 'Unary', op: 'not', expr: parseUnary() };
+    }
+
+    return parsePostfix();
+  }
+
+  function parseMulDiv() {
+    let node = parseUnary();
+
+    while (peek('*', '/')) {
+      const op = consume().value;
+      const right = parseUnary();
+      node = { type: 'Binary', op, left: node, right };
+    }
+
+    return node;
+  }
+
+  function parseAddSub() {
+    let node = parseMulDiv();
+
+    while (peek('+', '-')) {
+      const op = consume().value;
+      const right = parseMulDiv();
+      node = { type: 'Binary', op, left: node, right };
+    }
+
+    return node;
+  }
+
+  function parseComparison() {
+    let node = parseAddSub();
+
+    while (peek('OP', '>', '<')) {
+      const op = consume().value;
+      const right = parseAddSub();
+      node = { type: 'Binary', op, left: node, right };
+    }
+
+    return node;
+  }
+
+  function parseAnd() {
+    let node = parseComparison();
+
+    while (peek('LOGIC') && tokens[pos].value === 'and') {
+      consume('LOGIC');
+      const right = parseComparison();
+      node = { type: 'Binary', op: 'and', left: node, right };
+    }
+
+    return node;
+  }
+
+  function parseOr() {
+    let node = parseAnd();
+
+    while (peek('LOGIC') && tokens[pos].value === 'or') {
+      consume('LOGIC');
+      const right = parseAnd();
+      node = { type: 'Binary', op: 'or', left: node, right };
+    }
+
+    return node;
+  }
+
+  const ast = parseOr();
+
+  if (pos < tokens.length) {
+    const t = tokens[pos];
+    throw new Error(`Unerwartetes Token: ${t.type}:${t.value}`);
+  }
+
+  return ast;
+}
+
+// --------------------------------------------------
+// Date / time helpers
+// --------------------------------------------------
+function parseDateValue(value) {
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) {
+      throw new Error('Ungültiges Date-Objekt');
+    }
+    return new Date(value.getTime());
+  }
+
+  if (typeof value === 'number') {
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) {
+      throw new Error(`Ungültiger Millisekundenwert für Datum: ${value}`);
+    }
+    return d;
+  }
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+      const d = new Date(`${trimmed}T00:00:00Z`);
+      if (Number.isNaN(d.getTime())) {
+        throw new Error(`Ungültiges Datum: ${value}`);
+      }
+      return d;
+    }
+
+    const d = new Date(trimmed);
+    if (Number.isNaN(d.getTime())) {
+      throw new Error(`Ungültiger Datumsstring: ${value}`);
+    }
+    return d;
+  }
+
+  throw new Error(`Wert kann nicht als Datum interpretiert werden: ${value}`);
+}
+
+function daysInUtcMonth(year, monthIndexZeroBased) {
+  return new Date(Date.UTC(year, monthIndexZeroBased + 1, 0)).getUTCDate();
+}
+
+function addUtcYears(date, amount) {
+  const d = parseDateValue(date);
+  const n = Number(amount);
+
+  if (!Number.isInteger(n)) {
+    throw new Error(`Jahre müssen ganzzahlig sein: ${amount}`);
+  }
+
+  const year = d.getUTCFullYear() + n;
+  const month = d.getUTCMonth();
+  const day = Math.min(d.getUTCDate(), daysInUtcMonth(year, month));
+
+  return new Date(Date.UTC(
+    year,
+    month,
+    day,
+    d.getUTCHours(),
+    d.getUTCMinutes(),
+    d.getUTCSeconds(),
+    d.getUTCMilliseconds()
+  ));
+}
+
+function addUtcMonths(date, amount) {
+  const d = parseDateValue(date);
+  const n = Number(amount);
+
+  if (!Number.isInteger(n)) {
+    throw new Error(`Monate müssen ganzzahlig sein: ${amount}`);
+  }
+
+  const totalMonths = d.getUTCFullYear() * 12 + d.getUTCMonth() + n;
+  const year = Math.floor(totalMonths / 12);
+  const month = ((totalMonths % 12) + 12) % 12;
+  const day = Math.min(d.getUTCDate(), daysInUtcMonth(year, month));
+
+  return new Date(Date.UTC(
+    year,
+    month,
+    day,
+    d.getUTCHours(),
+    d.getUTCMinutes(),
+    d.getUTCSeconds(),
+    d.getUTCMilliseconds()
+  ));
+}
+
+function unitToMs(unitRaw) {
+  const unit = String(unitRaw).toLowerCase();
+
+  switch (unit) {
+    case 'ms':
+    case 'millisecond':
+    case 'milliseconds':
+      return 1;
+    case 's':
+    case 'second':
+    case 'seconds':
+      return 1000;
+    case 'm':
+    case 'minute':
+    case 'minutes':
+      return 60 * 1000;
+    case 'h':
+    case 'hour':
+    case 'hours':
+      return 60 * 60 * 1000;
+    case 'd':
+    case 'day':
+    case 'days':
+      return 24 * 60 * 60 * 1000;
+    case 'w':
+    case 'week':
+    case 'weeks':
+      return 7 * 24 * 60 * 60 * 1000;
+    default:
+      throw new Error(`Unbekannte feste Zeiteinheit: ${unitRaw}`);
+  }
+}
+
+function addToDate(date, amountRaw, unitRaw) {
+  const dateObj = parseDateValue(date);
+  const unit = String(unitRaw).toLowerCase();
+  const amount = Number(amountRaw);
+
+  if (!Number.isFinite(amount)) {
+    throw new Error(`Ungültiger Additionswert: ${amountRaw}`);
+  }
+
+  if (['y', 'year', 'years'].includes(unit)) {
+    return addUtcYears(dateObj, amount);
+  }
+
+  if (['o', 'month', 'months'].includes(unit)) {
+    return addUtcMonths(dateObj, amount);
+  }
+
+  const ms = unitToMs(unit);
+  return new Date(dateObj.getTime() + amount * ms);
+}
+
+function diffByUnit(leftDate, rightDate, unitRaw) {
+  const unit = String(unitRaw).toLowerCase();
+
+  if (['y', 'year', 'years'].includes(unit)) {
+    const sign = leftDate >= rightDate ? 1 : -1;
+    const start = sign === 1 ? rightDate : leftDate;
+    const end = sign === 1 ? leftDate : rightDate;
+
+    let years = end.getUTCFullYear() - start.getUTCFullYear();
+    let candidate = addUtcYears(start, years);
+    if (candidate > end) years--;
+
+    return years * sign;
+  }
+
+  if (['o', 'month', 'months'].includes(unit)) {
+    const sign = leftDate >= rightDate ? 1 : -1;
+    const start = sign === 1 ? rightDate : leftDate;
+    const end = sign === 1 ? leftDate : rightDate;
+
+    let months = (end.getUTCFullYear() - start.getUTCFullYear()) * 12 +
+      (end.getUTCMonth() - start.getUTCMonth());
+
+    let candidate = addUtcMonths(start, months);
+    if (candidate > end) months--;
+
+    return months * sign;
+  }
+
+  const ms = leftDate.getTime() - rightDate.getTime();
+  const divisor = unitToMs(unit);
+  return ms / divisor;
+}
+
+function weekdayNumber(date) {
+  const day = parseDateValue(date).getUTCDay();
+  return day === 0 ? 7 : day;
+}
+
+function weekdayName(date, locale = 'de', style = 'long') {
+  const normalizedLocale = String(locale).toLowerCase() === 'en' ? 'en-US' : 'de-DE';
+  const normalizedStyle = String(style).toLowerCase() === 'short' ? 'short' : 'long';
+
+  return new Intl.DateTimeFormat(normalizedLocale, {
+    weekday: normalizedStyle,
+    timeZone: 'UTC',
+  }).format(parseDateValue(date));
+}
+
+function labelForUnit(unit, value, locale) {
+  const isEn = String(locale).toLowerCase() === 'en';
+
+  const map = isEn
+    ? {
+        y: ['year', 'years'],
+        o: ['month', 'months'],
+        w: ['week', 'weeks'],
+        d: ['day', 'days'],
+        h: ['hour', 'hours'],
+        m: ['minute', 'minutes'],
+        s: ['second', 'seconds'],
+      }
+    : {
+        y: ['Jahr', 'Jahre'],
+        o: ['Monat', 'Monate'],
+        w: ['Woche', 'Wochen'],
+        d: ['Tag', 'Tage'],
+        h: ['Stunde', 'Stunden'],
+        m: ['Minute', 'Minuten'],
+        s: ['Sekunde', 'Sekunden'],
+      };
+
+  const [singular, plural] = map[unit];
+  return `${value} ${value === 1 ? singular : plural}`;
+}
+
+function computeSelectedDurationParts(dateA, dateB, mask = 'yowdhms') {
+  const allowed = ['y', 'o', 'w', 'd', 'h', 'm', 's'];
+  const normalizedMask = String(mask).toLowerCase();
+  const selected = allowed.filter(x => normalizedMask.includes(x));
+
+  if (selected.length === 0) {
+    throw new Error('diffHuman benötigt mindestens eine Einheit in der Maske, z. B. "yowdhms", "dhm" oder "w"');
+  }
+
+  let start = parseDateValue(dateA);
+  let end = parseDateValue(dateB);
+  let sign = 1;
+
+  if (start > end) {
+    const tmp = start;
+    start = end;
+    end = tmp;
+    sign = -1;
+  }
+
+  let cursor = new Date(start.getTime());
+  const result = [];
+
+  for (const unit of selected) {
+    let value = 0;
+
+    if (unit === 'y') {
+      value = end.getUTCFullYear() - cursor.getUTCFullYear();
+      let candidate = addUtcYears(cursor, value);
+      if (candidate > end) {
+        value -= 1;
+        candidate = addUtcYears(cursor, value);
+      }
+      cursor = candidate;
+    } else if (unit === 'o') {
+      value = (end.getUTCFullYear() - cursor.getUTCFullYear()) * 12 +
+        (end.getUTCMonth() - cursor.getUTCMonth());
+
+      let candidate = addUtcMonths(cursor, value);
+      if (candidate > end) {
+        value -= 1;
+        candidate = addUtcMonths(cursor, value);
+      }
+      cursor = candidate;
+    } else {
+      const unitMs = unitToMs(
+        unit === 'w' ? 'weeks' :
+        unit === 'd' ? 'days' :
+        unit === 'h' ? 'hours' :
+        unit === 'm' ? 'minutes' :
+        'seconds'
+      );
+      value = Math.floor((end.getTime() - cursor.getTime()) / unitMs);
+      cursor = new Date(cursor.getTime() + value * unitMs);
+    }
+
+    result.push({ unit, value });
+  }
+
+  return { sign, parts: result };
+}
+
+function formatDurationParts(dateA, dateB, mask = 'yowdhms', locale = 'de') {
+  const { sign, parts } = computeSelectedDurationParts(dateA, dateB, mask);
+
+  const text = parts
+    .map(p => labelForUnit(p.unit, p.value, locale))
+    .join(', ');
+
+  return sign < 0 ? `-${text}` : text;
+}
+
+// --------------------------------------------------
+// Expression evaluator
+// --------------------------------------------------
+function evalAst(node) {
+  switch (node.type) {
+    case 'Literal':
+      return node.value;
+
+    case 'Unary': {
+      const v = evalAst(node.expr);
+
+      switch (node.op) {
+        case '+':
+          return Number(v);
+        case '-':
+          return -Number(v);
+        case '!':
+        case 'not':
+          return !Boolean(v);
+        default:
+          throw new Error(`Unbekannter Unary-Operator: ${node.op}`);
+      }
+    }
+
+    case 'Binary': {
+      if (node.op === 'and') {
+        return Boolean(evalAst(node.left)) && Boolean(evalAst(node.right));
+      }
+
+      if (node.op === 'or') {
+        return Boolean(evalAst(node.left)) || Boolean(evalAst(node.right));
+      }
+
+      const left = evalAst(node.left);
+      const right = evalAst(node.right);
+
+      switch (node.op) {
+        case '+':
+          return Number(left) + Number(right);
+        case '-':
+          return Number(left) - Number(right);
+        case '*':
+          return Number(left) * Number(right);
+        case '/':
+          return Number(left) / Number(right);
+        case '==':
+          return left === right;
+        case '!=':
+          return left !== right;
+        case '>':
+          return left > right;
+        case '<':
+          return left < right;
+        case '>=':
+          return left >= right;
+        case '<=':
+          return left <= right;
+        default:
+          throw new Error(`Unbekannter Binary-Operator: ${node.op}`);
+      }
+    }
+
+    case 'Call': {
+      const target = evalAst(node.target);
+      const args = node.args.map(evalAst);
+
+      switch (node.callee) {
+        case 'toInt': {
+          if (args.length !== 0) throw new Error('toInt() erwartet keine Argumente');
+          const v = parseInt(String(target), 10);
+          if (Number.isNaN(v)) {
+            throw new Error(`toInt() konnte "${target}" nicht in eine Zahl umwandeln`);
+          }
+          return v;
+        }
+
+        case 'toFloat': {
+          if (args.length !== 0) throw new Error('toFloat() erwartet keine Argumente');
+          const v = parseFloat(String(target));
+          if (Number.isNaN(v)) {
+            throw new Error(`toFloat() konnte "${target}" nicht in eine Zahl umwandeln`);
+          }
+          return v;
+        }
+
+        case 'length':
+          if (args.length !== 0) throw new Error('length() erwartet keine Argumente');
+          return String(target).length;
+
+        case 'trim':
+          if (args.length !== 0) throw new Error('trim() erwartet keine Argumente');
+          return String(target).trim();
+
+        case 'upper':
+          if (args.length !== 0) throw new Error('upper() erwartet keine Argumente');
+          return String(target).toUpperCase();
+
+        case 'lower':
+          if (args.length !== 0) throw new Error('lower() erwartet keine Argumente');
+          return String(target).toLowerCase();
+
+        case 'toDateIso': {
+          if (args.length !== 0) throw new Error('toDateIso() erwartet keine Argumente');
+          return parseDateValue(target).toISOString();
+        }
+
+        case 'toMillis': {
+          if (args.length !== 0) throw new Error('toMillis() erwartet keine Argumente');
+          return parseDateValue(target).getTime();
+        }
+
+        case 'toUnix': {
+          if (args.length !== 0) throw new Error('toUnix() erwartet keine Argumente');
+          return Math.floor(parseDateValue(target).getTime() / 1000);
+        }
+
+        case 'diff': {
+          if (args.length !== 2) {
+            throw new Error('diff(other, unit) erwartet genau 2 Argumente');
+          }
+          const leftDate = parseDateValue(target);
+          const rightDate = parseDateValue(args[0]);
+          return diffByUnit(leftDate, rightDate, args[1]);
+        }
+
+        case 'diffHuman': {
+          if (args.length < 1 || args.length > 3) {
+            throw new Error('diffHuman(other, mask?, locale?) erwartet 1 bis 3 Argumente');
+          }
+          const leftDate = parseDateValue(target);
+          const rightDate = parseDateValue(args[0]);
+          const mask = args.length >= 2 ? args[1] : 'yowdhms';
+          const locale = args.length >= 3 ? args[2] : 'de';
+          return formatDurationParts(leftDate, rightDate, mask, locale);
+        }
+
+        case 'add': {
+          if (args.length !== 2) {
+            throw new Error('add(amount, unit) erwartet genau 2 Argumente');
+          }
+          return addToDate(target, args[0], args[1]).toISOString();
+        }
+
+        case 'weekday': {
+          if (args.length !== 0) throw new Error('weekday() erwartet keine Argumente');
+          return weekdayNumber(target);
+        }
+
+        case 'weekdayName': {
+          if (args.length > 2) {
+            throw new Error('weekdayName(locale?, style?) erwartet höchstens 2 Argumente');
+          }
+          const locale = args.length >= 1 ? args[0] : 'de';
+          const style = args.length >= 2 ? args[1] : 'long';
+          return weekdayName(target, locale, style);
+        }
+
+        default:
+          throw new Error(`Nicht erlaubte Funktion: ${node.callee}`);
+      }
+    }
+
+    default:
+      throw new Error(`Unbekannter AST-Node: ${node.type}`);
+  }
+}
+
+function evalExpression(expr) {
+  try {
+    const ast = parseExpression(expr);
+    return evalAst(ast);
+  } catch (err) {
+    throw new Error(`Ungültiger Ausdruck "${expr}": ${err.message}`);
+  }
+}
+
+// --------------------------------------------------
+// Template parser
+// --------------------------------------------------
+function parseTemplate(template, debug = null) {
+  const tokens = tokenizeTemplate(template);
+  let index = 0;
+
+  if (debug) {
+    debug.tags = tokens
+      .filter(t => t.type === 'TAG')
+      .map(t => t.raw);
+  }
+
+  function parseNodes(stopTags = []) {
+    const nodes = [];
+
+    while (index < tokens.length) {
+      const token = tokens[index];
+
+      if (token.type === 'TEXT') {
+        nodes.push({ type: 'TEXT', value: token.value });
+        index++;
+        continue;
+      }
+
+      const rawTag = token.value;
+      const tagName = rawTag.split(/\s+/)[0].toLowerCase();
+
+      if (stopTags.includes(tagName)) {
+        break;
+      }
+
+      if (tagName === 'if') {
+        nodes.push(parseIf());
+        continue;
+      }
+
+      if (tagName === 'switch') {
+        nodes.push(parseSwitch());
+        continue;
+      }
+
+      if (tagName === 'expr') {
+        nodes.push(parseExpr());
+        continue;
+      }
+
+      throw new Error(`Unerwarteter Tag: {% ${rawTag} %}`);
+    }
+
+    return nodes;
+  }
+
+  function parseIf() {
+    const rawTag = tokens[index].value;
+    const condition = rawTag.replace(/^if\s+/i, '').trim();
+
+    if (!condition) {
+      throw new Error('if ohne Bedingung');
+    }
+
+    index++;
+
+    const branches = [];
+    branches.push({
+      condition,
+      body: parseNodes(['elseif', 'else', 'endif']),
+    });
+
+    while (index < tokens.length && tokens[index].type === 'TAG') {
+      const currentTag = tokens[index].value;
+      const currentName = currentTag.split(/\s+/)[0].toLowerCase();
+
+      if (currentName === 'elseif') {
+        const elseifCondition = currentTag.replace(/^elseif\s+/i, '').trim();
+
+        if (!elseifCondition) {
+          throw new Error('elseif ohne Bedingung');
+        }
+
+        index++;
+        branches.push({
+          condition: elseifCondition,
+          body: parseNodes(['elseif', 'else', 'endif']),
+        });
+        continue;
+      }
+
+      if (currentName === 'else') {
+        index++;
+        const elseBody = parseNodes(['endif']);
+
+        if (
+          index >= tokens.length ||
+          tokens[index].type !== 'TAG' ||
+          tokens[index].value.trim().toLowerCase() !== 'endif'
+        ) {
+          throw new Error('else ohne passendes endif');
+        }
+
+        index++;
+        return {
+          type: 'IF',
+          branches,
+          elseBody,
+        };
+      }
+
+      if (currentName === 'endif') {
+        index++;
+        return {
+          type: 'IF',
+          branches,
+          elseBody: null,
+        };
+      }
+
+      throw new Error(`Unerwarteter Tag im if-Block: {% ${currentTag} %}`);
+    }
+
+    throw new Error('if ohne passendes endif');
+  }
+
+  function parseSwitch() {
+    const rawTag = tokens[index].value;
+    const expr = rawTag.replace(/^switch\s+/i, '').trim();
+
+    if (!expr) {
+      throw new Error('switch ohne Ausdruck');
+    }
+
+    index++;
+
+    const cases = [];
+    let defaultBody = null;
+
+    while (index < tokens.length) {
+      const current = tokens[index];
+
+      if (current.type !== 'TAG') {
+        if (current.type === 'TEXT' && current.value.trim() === '') {
+          index++;
+          continue;
+        }
+        throw new Error('Text direkt innerhalb von switch ist nicht erlaubt. Bitte case/default verwenden.');
+      }
+
+      const currentTag = current.value;
+      const currentName = currentTag.split(/\s+/)[0].toLowerCase();
+
+      if (currentName === 'case') {
+        const caseExpr = currentTag.replace(/^case\s+/i, '').trim();
+
+        if (!caseExpr) {
+          throw new Error('case ohne Ausdruck');
+        }
+
+        index++;
+        cases.push({
+          expr: caseExpr,
+          body: parseNodes(['case', 'default', 'endswitch']),
+        });
+        continue;
+      }
+
+      if (currentName === 'default') {
+        index++;
+        defaultBody = parseNodes(['endswitch']);
+        continue;
+      }
+
+      if (currentName === 'endswitch') {
+        index++;
+        return {
+          type: 'SWITCH',
+          expr,
+          cases,
+          defaultBody,
+        };
+      }
+
+      throw new Error(`Unerwarteter Tag im switch-Block: {% ${currentTag} %}`);
+    }
+
+    throw new Error('switch ohne passendes endswitch');
+  }
+
+  function parseExpr() {
+    const rawTag = tokens[index].value;
+    const expr = rawTag.replace(/^expr\s+/i, '').trim();
+
+    if (!expr) {
+      throw new Error('expr ohne Ausdruck');
+    }
+
+    index++;
+    return {
+      type: 'EXPR',
+      expr,
+    };
+  }
+
+  return parseNodes();
+}
+
+// --------------------------------------------------
+// AST summary
+// --------------------------------------------------
+function summarizeAst(nodes) {
+  const summary = {
+    text_count: 0,
+    if_count: 0,
+    switch_count: 0,
+    expr_count: 0,
+  };
+
+  function walk(list) {
+    for (const node of list) {
+      if (node.type === 'TEXT') {
+        summary.text_count += 1;
+      } else if (node.type === 'EXPR') {
+        summary.expr_count += 1;
+      } else if (node.type === 'IF') {
+        summary.if_count += 1;
+        for (const b of node.branches) walk(b.body);
+        if (node.elseBody) walk(node.elseBody);
+      } else if (node.type === 'SWITCH') {
+        summary.switch_count += 1;
+        for (const c of node.cases) walk(c.body);
+        if (node.defaultBody) walk(node.defaultBody);
+      }
+    }
+  }
+
+  walk(nodes);
+  return summary;
+}
+
+// --------------------------------------------------
+// Template renderer
+// --------------------------------------------------
+function renderNodes(nodes) {
+  let output = '';
+
+  for (const node of nodes) {
+    if (node.type === 'TEXT') {
+      output += node.value;
+      continue;
+    }
+
+    if (node.type === 'EXPR') {
+      let value;
+      try {
+        value = evalExpression(node.expr);
+      } catch (err) {
+        throw new Error(`Fehler in expr "${node.expr}": ${err.message}`);
+      }
+      output += stringifyValue(value);
+      continue;
+    }
+
+    if (node.type === 'IF') {
+      let matched = false;
+
+      for (const branch of node.branches) {
+        let result;
+        try {
+          result = Boolean(evalExpression(branch.condition));
+        } catch (err) {
+          throw new Error(`Fehler in if-Bedingung "${branch.condition}": ${err.message}`);
+        }
+
+        if (result) {
+          output += renderNodes(branch.body);
+          matched = true;
+          break;
+        }
+      }
+
+      if (!matched && node.elseBody) {
+        output += renderNodes(node.elseBody);
+      }
+
+      continue;
+    }
+
+    if (node.type === 'SWITCH') {
+      let switchValue;
+
+      try {
+        switchValue = evalExpression(node.expr);
+      } catch (err) {
+        throw new Error(`Fehler in switch-Ausdruck "${node.expr}": ${err.message}`);
+      }
+
+      let matched = false;
+
+      for (const c of node.cases) {
+        let caseValue;
+
+        try {
+          caseValue = evalExpression(c.expr);
+        } catch (err) {
+          throw new Error(`Fehler in case-Ausdruck "${c.expr}": ${err.message}`);
+        }
+
+        if (switchValue === caseValue) {
+          output += renderNodes(c.body);
+          matched = true;
+          break;
+        }
+      }
+
+      if (!matched && node.defaultBody) {
+        output += renderNodes(node.defaultBody);
+      }
+
+      continue;
+    }
+
+    throw new Error(`Unbekannter Node-Typ: ${node.type}`);
+  }
+
+  return output;
+}
+
+function cleanupOutput(text) {
+  return String(text)
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function buildDebugObject(level) {
+  return {
+    level,
+    placeholders: [],
+    tags: [],
+  };
+}
+
+function renderTemplateDetailed(template, itemJson, options = {}) {
+  const debugEnabled = Boolean(options.debug);
+  const debugLevel = Number(options.debug_level || 1);
+  const debug = debugEnabled ? buildDebugObject(debugLevel) : null;
+
+  const templateOriginal = String(template);
+  const templateAfterPlaceholders = replacePlaceholders(templateOriginal, itemJson, debug);
+  const ast = parseTemplate(templateAfterPlaceholders, debug);
+  const renderedBeforeCleanup = renderNodes(ast);
+  const renderedAfterCleanup = options.cleanup === false
+    ? renderedBeforeCleanup
+    : cleanupOutput(renderedBeforeCleanup);
+
+  const result = {
+    rendered: renderedAfterCleanup,
+  };
+
+  if (debugEnabled) {
+    result.debug = {
+      template_original: templateOriginal,
+      template_after_placeholders: templateAfterPlaceholders,
+    };
+
+    if (debugLevel >= 2) {
+      result.debug.placeholders = debug.placeholders;
+      result.debug.tags = debug.tags;
+      result.debug.rendered_before_cleanup = renderedBeforeCleanup;
+    }
+
+    if (debugLevel >= 3) {
+      result.debug.ast_summary = summarizeAst(ast);
+      result.debug.rendered_after_cleanup = renderedAfterCleanup;
+    }
+  }
+
+  return result;
+}
+
+// --------------------------------------------------
+// n8n main
+// --------------------------------------------------
+const results = [];
+
+for (const item of $input.all()) {
+  const template = item.json.template;
+  const debugEnabled = Boolean(item.json.debug);
+  const debugLevel = Number(item.json.debug_level || 1);
+  const debugCaptureError = Boolean(item.json.debug_capture_error);
+
+  if (typeof template !== 'string') {
+    throw new Error('item.json.template muss ein String sein.');
+  }
+
+  try {
+    const renderedResult = renderTemplateDetailed(template, item.json, {
+      cleanup: true,
+      debug: debugEnabled,
+      debug_level: debugLevel,
+    });
+
+    results.push({
+      json: {
+        ...item.json,
+        rendered: renderedResult.rendered,
+        ...(renderedResult.debug ? { debug: renderedResult.debug } : {}),
+      },
+    });
+  } catch (err) {
+    if (!debugCaptureError) {
+      throw err;
+    }
+
+    results.push({
+      json: {
+        ...item.json,
+        rendered: null,
+        error: {
+          message: err.message,
+        },
+      },
+    });
+  }
+}
+
+return results;
+
+```
+
+Zwei Empfehlungen für den direkten Start:
+
+Für Bedingungen immer lieber so schreiben:
+
+```typescript
+{% if ("{{crew_trust}}").toInt() > 150 %}
+
+```
+
+und nicht so:
+
+```typescript
+{% if {{crew_trust}} > 150 %}
+
+```
+
+Und für Datumsmasken bei `diffHuman()` gilt:
+
+- `y` = Jahre
+
+- `o` = Monate
+
+- `w` = Wochen
+
+- `d` = Tage
+
+- `h` = Stunden
+
+- `m` = Minuten
+
+- `s` = Sekunden
+
+Also zum Beispiel:
+
+```typescript
+{% expr ("{{now_iso}}").diffHuman("{{signal_time}}", "yodhm", "de") %}
+
+```
+
+Wenn du magst, gehe ich als Nächstes einmal mit dir ein oder zwei echte Templates aus deinem AuraWrite-Kontext durch und prüfe, ob sie schon idiomatisch für diesen Interpreter geschrieben sind.
