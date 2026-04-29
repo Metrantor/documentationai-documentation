@@ -1,0 +1,509 @@
+---
+title: get_author_style_bundle
+---
+# Zweck
+
+Die Funktion lädt für einen bestimmten Autor alle Style-Sheets und Emotion-Modes aus Supabase/Postgres und gibt sie als kompaktes JSON zurück.
+
+Dabei werden **nur die Werte aus&#x20;**`injection_text` als Inhalt der jeweiligen JSON-Keys verwendet.
+
+Ziel ist, dass du die Werte später direkt in n8n, Prompt-Templates oder JavaScript so adressieren kannst:
+
+```typescript
+author.style.default
+author.style.noir
+author.style.emotions.melancholy
+author.style.emotions.anger
+```
+
+Die Funktion liest aus diesen Tabellen:
+
+```typescript
+public.author_style_sheets
+public.author_emotion_modes
+```
+
+---
+
+# 3. Parameter
+
+## `p_author_profile_id`
+
+Typ:
+
+```typescript
+uuid
+```
+
+Pflichtparameter.
+
+Das ist die ID des Autors aus deiner Tabelle:
+
+```typescript
+public.author_profiles.id
+```
+
+Beispiel:
+
+```typescript
+'8213e0e4-244f-45da-b036-1705787f4b88'::uuid
+```
+
+---
+
+## `p_only_active`
+
+Typ:
+
+```typescript
+boolean
+```
+
+Optionaler Parameter.
+
+Default:
+
+```typescript
+true
+```
+
+Bedeutung:
+
+Bei `true` werden nur aktive Datensätze geladen:
+
+```typescript
+is_active = true
+```
+
+Bei `false` werden auch inaktive Datensätze geladen.
+
+---
+
+# 4. Aufrufbeispiele
+
+## Einfacher SQL-Aufruf
+
+```typescript
+select public.get_author_style_bundle(
+  '8213e0e4-244f-45da-b036-1705787f4b88'::uuid
+);
+```
+
+Da `p_only_active` standardmäßig `true` ist, werden hier nur aktive Einträge geladen.
+
+---
+
+## SQL-Aufruf mit explizitem `p_only_active`
+
+```typescript
+select public.get_author_style_bundle(
+  '8213e0e4-244f-45da-b036-1705787f4b88'::uuid,
+  true
+);
+```
+
+---
+
+## SQL-Aufruf inklusive inaktiver Einträge
+
+```typescript
+select public.get_author_style_bundle(
+  '8213e0e4-244f-45da-b036-1705787f4b88'::uuid,
+  false
+);
+```
+
+---
+
+## SQL-Aufruf mit Alias für n8n
+
+Diese Variante ist für n8n am angenehmsten, weil der Rückgabewert dann einen klaren Feldnamen hat:
+
+```typescript
+select public.get_author_style_bundle(
+  '{{ $json.author_profile_id }}'::uuid,
+  true
+) as author_style_bundle;
+```
+
+Danach kannst du in n8n darauf zugreifen mit:
+
+```typescript
+$('Author Styles laden').first().json.author_style_bundle
+```
+
+Oder direkt auf einzelne Werte:
+
+```typescript
+$('Author Styles laden').first().json.author_style_bundle.author.style.default
+```
+
+```typescript
+$('Author Styles laden').first().json.author_style_bundle.author.style.emotions.melancholy
+```
+
+---
+
+## Supabase-JavaScript-Aufruf
+
+```typescript
+const { data, error } = await supabase.rpc("get_author_style_bundle", {
+  p_author_profile_id: authorProfileId,
+  p_only_active: true
+});
+
+if (error) {
+  throw error;
+}
+
+console.log(data.author.style.default);
+console.log(data.author.style.emotions.melancholy);
+```
+
+---
+
+# 5. Beispiel-Rückgabe in JSON
+
+Angenommen, in `author_style_sheets` stehen diese aktiven Einträge:
+
+```typescript
+mode_key: null        injection_text: "Schreibe klar, filmisch und präzise."
+mode_key: noir        injection_text: "Nutze harte Schatten, knappe Sätze und moralische Ambivalenz."
+mode_key: cinematic   injection_text: "Schreibe bildstark, körperlich und szenisch."
+```
+
+Und in `author_emotion_modes` stehen diese aktiven Einträge:
+
+```typescript
+mode_key: melancholy  injection_text: "Lege eine leise Melancholie unter jede Beobachtung."
+mode_key: anger       injection_text: "Lasse unterdrückte Wut in Rhythmus und Wortwahl spürbar werden."
+mode_key: wonder      injection_text: "Betone Staunen, Größe und das Gefühl des Unbekannten."
+```
+
+Dann gibt die Funktion zurück:
+
+```typescript
+{
+  "author": {
+    "style": {
+      "cinematic": "Schreibe bildstark, körperlich und szenisch.",
+      "default": "Schreibe klar, filmisch und präzise.",
+      "noir": "Nutze harte Schatten, knappe Sätze und moralische Ambivalenz.",
+      "emotions": {
+        "anger": "Lasse unterdrückte Wut in Rhythmus und Wortwahl spürbar werden.",
+        "melancholy": "Lege eine leise Melancholie unter jede Beobachtung.",
+        "wonder": "Betone Staunen, Größe und das Gefühl des Unbekannten."
+      }
+    }
+  }
+}
+```
+
+Dadurch kannst du später direkt adressieren:
+
+```typescript
+author.style.default
+author.style.cinematic
+author.style.noir
+author.style.emotions.anger
+author.style.emotions.melancholy
+author.style.emotions.wonder
+```
+
+---
+
+# 6. Create Statement
+
+```typescript
+create or replace function public.get_author_style_bundle(
+  p_author_profile_id uuid,
+  p_only_active boolean default true
+)
+returns jsonb
+language plpgsql
+stable
+security invoker
+set search_path = public
+as $$
+declare
+  /*
+    Enthält später alle Style-Sheets.
+
+    Beispiel:
+    {
+      "default": "Schreibe klar, filmisch und präzise.",
+      "noir": "Nutze harte Schatten, knappe Sätze."
+    }
+  */
+  v_styles jsonb;
+
+  /*
+    Enthält später alle Emotion-Modes.
+
+    Beispiel:
+    {
+      "melancholy": "Lege Melancholie unter die Szene.",
+      "anger": "Lasse Wut im Rhythmus spürbar werden."
+    }
+  */
+  v_emotions jsonb;
+
+begin
+  /*
+    Der JSON-Key "emotions" ist reserviert.
+
+    Grund:
+    Die Ausgabe nutzt diese Struktur:
+
+    author.style.emotions.<mode_key>
+
+    Wenn ein Style-Sheet ebenfalls mode_key = "emotions" hätte,
+    würde es mit dem Emotion-Container kollidieren.
+  */
+  if exists (
+    select 1
+    from public.author_style_sheets s
+    where s.author_profile_id = p_author_profile_id
+      and coalesce(nullif(s.mode_key, ''), 'default') = 'emotions'
+      and (not p_only_active or s.is_active = true)
+  ) then
+    raise exception 'mode_key "emotions" is reserved for author emotion modes';
+  end if;
+
+
+  /*
+    Style-Sheets laden.
+
+    Ergebnis:
+    author.style.<mode_key> = injection_text
+
+    Sonderfall:
+    mode_key NULL oder leerer String wird zu "default".
+
+    Falls mehrere Datensätze denselben JSON-Key hätten,
+    gewinnt deterministisch:
+    1. höchste version
+    2. neuestes updated_at
+    3. neuestes created_at
+    4. höchste id
+  */
+  with ranked_styles as (
+    select
+      s.*,
+      coalesce(nullif(s.mode_key, ''), 'default') as json_key,
+      row_number() over (
+        partition by coalesce(nullif(s.mode_key, ''), 'default')
+        order by
+          s.version desc,
+          s.updated_at desc,
+          s.created_at desc,
+          s.id desc
+      ) as rn
+    from public.author_style_sheets s
+    where s.author_profile_id = p_author_profile_id
+      and (not p_only_active or s.is_active = true)
+  )
+  select coalesce(
+    jsonb_object_agg(
+      json_key,
+      coalesce(injection_text, '')
+      order by json_key
+    ),
+    '{}'::jsonb
+  )
+  into v_styles
+  from ranked_styles
+  where rn = 1;
+
+
+  /*
+    Emotion-Modes laden.
+
+    Ergebnis:
+    author.style.emotions.<mode_key> = injection_text
+
+    Sortierung:
+    1. sort_order
+    2. mode_key alphabetisch
+  */
+  select coalesce(
+    jsonb_object_agg(
+      e.mode_key,
+      coalesce(e.injection_text, '')
+      order by e.sort_order, e.mode_key
+    ),
+    '{}'::jsonb
+  )
+  into v_emotions
+  from public.author_emotion_modes e
+  where e.author_profile_id = p_author_profile_id
+    and (not p_only_active or e.is_active = true);
+
+
+  /*
+    Finales JSON bauen.
+
+    Styles:
+    author.style.<mode_key>
+
+    Emotionen:
+    author.style.emotions.<mode_key>
+  */
+  return jsonb_build_object(
+    'author',
+    jsonb_build_object(
+      'style',
+      v_styles || jsonb_build_object(
+        'emotions', v_emotions
+      )
+    )
+  );
+end;
+$$;
+```
+
+---
+
+# 7. Rechte vergeben
+
+Für normale eingeloggte Supabase-User:
+
+```typescript
+grant execute on function public.get_author_style_bundle(uuid, boolean) to authenticated;
+```
+
+Für Backend-/Service-Role-Nutzung optional:
+
+```typescript
+grant execute on function public.get_author_style_bundle(uuid, boolean) to service_role;
+```
+
+---
+
+# 8. Kritische Punkte und Anmerkungen
+
+## `mode_key = null` wird zu `default`
+
+Wenn ein Style-Sheet keinen `mode_key` hat, wird es im JSON so ausgegeben:
+
+```typescript
+author.style.default
+```
+
+Das ist praktisch, weil dein Standard-Stil dadurch immer einen festen Zugriffspfad hat.
+
+---
+
+## Der Key `emotions` ist reserviert
+
+Ein Style-Sheet darf nicht diesen `mode_key` verwenden:
+
+```typescript
+emotions
+```
+
+Denn `emotions` wird als Container für die Emotion-Modes gebraucht:
+
+```typescript
+author.style.emotions.melancholy
+```
+
+Wenn trotzdem ein Style-Sheet mit `mode_key = emotions` existiert, wirft die Funktion bewusst einen Fehler.
+
+---
+
+## `injection_text = null` wird zu leerem String
+
+Wenn `injection_text` leer ist, gibt die Funktion nicht `null`, sondern `""` zurück.
+
+Beispiel:
+
+```typescript
+{
+  "author": {
+    "style": {
+      "default": ""
+    }
+  }
+}
+```
+
+Das ist für Prompt-Templates meist sicherer, weil leere Strings weniger Probleme machen als `null`.
+
+---
+
+## Reihenfolge im JSON ist nicht für Logik wichtig
+
+Die Funktion sortiert Styles alphabetisch nach Key und Emotionen nach `sort_order`, danach nach `mode_key`.
+
+Trotzdem solltest du dich in JavaScript oder n8n nie auf die sichtbare Reihenfolge der JSON-Keys verlassen, sondern immer über den Key zugreifen:
+
+```typescript
+author.style.default
+author.style.emotions.anger
+```
+
+---
+
+## `mode_key` sollte promptfreundlich sein
+
+Für einfache n8n-/JavaScript-Zugriffe sind solche Keys gut:
+
+```typescript
+default
+noir
+cinematic
+melancholy
+anger
+wonder
+```
+
+Ungünstig wären Keys mit Leerzeichen, Bindestrichen oder Sonderzeichen, weil du dann nicht mehr bequem mit Punktnotation zugreifen kannst.
+
+Gut:
+
+```typescript
+author.style.dark
+```
+
+Schwieriger:
+
+```typescript
+author.style["dark-style"]
+```
+
+Dein aktueller Check bei `author_style_sheets` erlaubt ohnehin nur Kleinbuchstaben:
+
+```typescript
+mode_key ~ '^[a-z]+$'
+```
+
+---
+
+## Empfehlung für n8n
+
+Im n8n-Postgres-Node am besten immer mit Alias aufrufen:
+
+```typescript
+select public.get_author_style_bundle(
+  '{{ $json.author_profile_id }}'::uuid,
+  true
+) as author_style_bundle;
+```
+
+Dann ist der Zugriff im Code Node klar:
+
+```typescript
+const authorStyleBundle =
+  $('Author Styles laden').first().json.author_style_bundle;
+
+const author = authorStyleBundle.author;
+```
+
+Und später:
+
+```typescript
+author.style.default
+author.style.emotions.melancholy
+```
+

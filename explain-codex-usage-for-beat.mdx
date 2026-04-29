@@ -1,0 +1,885 @@
+---
+title: explain_codex_usage_for_beat
+---
+# `public.explain_codex_usage_for_beat(...)`
+
+## Zweck
+
+Große Diagnosefunktion.
+
+Sie liefert zusätzlich zur kleinen Funktion mehr Analysekontext, typischerweise:
+
+- `final_ids`
+
+- mehr technische Zustände
+
+- detailliertere `reasons`
+
+- ggf. `likely_rejection_reasons`
+
+Sie ist für:
+
+- Debugging
+
+- QA
+
+- Admin-/Power-Analyse
+
+gedacht.
+
+---
+
+## Signatur
+
+```typescript
+public.explain_codex_usage_for_beat(
+  p_beat_id uuid,
+  p_text text default null,
+  p_max_relation_depth integer default 2
+) returns jsonb
+```
+
+---
+
+## Aufrufparameter
+
+### `p_beat_id uuid`
+
+Beat, dessen Codex-Kontext erklärt werden soll.
+
+### `p_text text default null`
+
+Optionaler alternativer Text.
+
+### `p_max_relation_depth integer default 2`
+
+Maximale Rekursionstiefe.
+
+Semantik:
+
+- `0` = keine Relationsauflösung&#x20;
+
+- `1` = ein Hop&#x20;
+
+- `2` = zwei Hops&#x20;
+
+- `< 0` = intern `0`&#x20;
+
+---
+
+## Wie die Funktion arbeitet
+
+### 1. Beat-Kontext laden
+
+Ermittelt:
+
+- `series_id`&#x20;
+
+- `chapter_id`&#x20;
+
+- `effective_at`&#x20;
+
+- `pov_character_id`&#x20;
+
+- `resolved_text`&#x20;
+
+### 2. Tiefe normalisieren
+
+`p_max_relation_depth` wird intern auf mindestens `0` gesetzt.
+
+### 3. Finalen Codex-Kontext bauen
+
+Es werden einbezogen:
+
+- &#x20;direkte Texttreffer&#x20;
+
+- &#x20;Relationstreffer bis zur gewünschten Tiefe&#x20;
+
+- &#x20;Super-Codex&#x20;
+
+- &#x20;Chapter-Codex&#x20;
+
+- &#x20;World-Codex&#x20;
+
+- &#x20;Exclusions&#x20;
+
+- &#x20;Datumslogik&#x20;
+
+### 4. `relation_depth` bestimmen
+
+Für jeden Eintrag:
+
+- `0` = direkter Treffer oder nicht rekursiv nötig&#x20;
+
+- `1+` = über Relationen erreicht&#x20;
+
+- &#x20;kleinste erreichte Tiefe gewinnt&#x20;
+
+### 5. Details prüfen
+
+Wie in der kleinen Funktion, aber typischerweise mit mehr Diagnosefeldern.
+
+### 6. Große Explain-Antwort erzeugen
+
+Mit:
+
+- `input`&#x20;
+
+- `final_ids`&#x20;
+
+- `codex_entries`&#x20;
+
+- `codex_details`&#x20;
+
+---
+
+## Rückgabeformat
+
+```typescript
+{
+  "input": { ... },
+  "final_ids": { ... },
+  "codex_entries": [ ... ],
+  "codex_details": [ ... ]
+}
+```
+
+---
+
+## Rückgabefelder
+
+### `input`
+
+Typisch:
+
+- `beat_id`&#x20;
+
+- `series_id`&#x20;
+
+- `chapter_id`&#x20;
+
+- `effective_at`&#x20;
+
+- `pov_character_id`&#x20;
+
+- `provided_text`&#x20;
+
+- `resolved_text`&#x20;
+
+- `max_relation_depth`&#x20;
+
+### `final_ids`
+
+Typisch:
+
+- `standard_codex_ids`&#x20;
+
+- `super_codex_ids`&#x20;
+
+- `chapter_codex_ids`&#x20;
+
+- `world_codex_ids`&#x20;
+
+### `codex_entries`
+
+Typisch:
+
+- `codex_entry_id`&#x20;
+
+- `codex_name`&#x20;
+
+- `entry_type`&#x20;
+
+- `included_in_context`&#x20;
+
+- `included_buckets`&#x20;
+
+- `relation_depth`&#x20;
+
+- `state`&#x20;
+
+- `reasons`&#x20;
+
+- `human_summary`&#x20;
+
+- `human_reason_lines`&#x20;
+
+- `likely_rejection_reasons`&#x20;
+
+### `codex_details`
+
+Typisch:
+
+- `conditional_entry_id`&#x20;
+
+- `codex_entry_id`&#x20;
+
+- `codex_name`&#x20;
+
+- `title`&#x20;
+
+- `included_in_context`&#x20;
+
+- `state`&#x20;
+
+- `human_summary`&#x20;
+
+- `human_reason_lines`&#x20;
+
+- `likely_rejection_reasons`&#x20;
+
+---
+
+## Aufrufbeispiele
+
+```typescript
+select public.explain_codex_usage_for_beat(
+  '060e0e92-ddb4-41de-99d3-027acccaa9ea'::uuid
+);
+```
+
+```typescript
+select public.explain_codex_usage_for_beat(
+  '060e0e92-ddb4-41de-99d3-027acccaa9ea'::uuid,
+  null,
+  1
+);
+```
+
+```typescript
+select public.explain_codex_usage_for_beat(
+  '060e0e92-ddb4-41de-99d3-027acccaa9ea'::uuid,
+  'Kirk und Nate nähern sich der Höhle auf Vega I.',
+  3
+);
+```
+
+---
+
+## Beispielrückgabe
+
+```typescript
+{
+  "input": {
+    "beat_id": "060e0e92-ddb4-41de-99d3-027acccaa9ea",
+    "series_id": "f1315197-5666-40b3-be56-42b4a3b1557e",
+    "chapter_id": "8213e0e4-244f-45da-b036-1705787f4b88",
+    "effective_at": null,
+    "provided_text": null,
+    "resolved_text": "Beschreibe wie sich Nate und Kirk ...",
+    "max_relation_depth": 2
+  },
+  "final_ids": {
+    "standard_codex_ids": [
+      "0b2479ee-95bd-458d-8933-62b6e8027f13"
+    ],
+    "super_codex_ids": [],
+    "chapter_codex_ids": [],
+    "world_codex_ids": []
+  },
+  "codex_entries": [
+    {
+      "codex_name": "Kirk Washington",
+      "codex_entry_id": "0b2479ee-95bd-458d-8933-62b6e8027f13",
+      "entry_type": "character",
+      "included_in_context": true,
+      "included_buckets": ["codex"],
+      "relation_depth": 0,
+      "human_summary": "Kirk Washington ist im finalen Kontext als Codex.",
+      "human_reason_lines": [
+        "Finaler Bucket: Codex.",
+        "Name oder Alias wurde im Text erkannt."
+      ]
+    }
+  ],
+  "codex_details": [
+    {
+      "conditional_entry_id": "3443e6cf-7c55-4cbb-8894-626d6c8a49e4",
+      "codex_entry_id": "0b2479ee-95bd-458d-8933-62b6e8027f13",
+      "codex_name": "Kirk Washington",
+      "title": "Neues Detail",
+      "included_in_context": true,
+      "human_summary": "Das Detail „Neues Detail“ ist im Kontext.",
+      "human_reason_lines": [
+        "Der zugehörige Codex-Eintrag ist als Codex im finalen Kontext.",
+        "Alle Variablenbedingungen sind erfüllt.",
+        "Es sind keine Hyper-Codex-Trigger definiert."
+      ]
+    }
+  ]
+}
+```
+
+---
+
+## Das echte CREATE-Statement sicher aus der DB holen
+
+```typescript
+select pg_get_functiondef('public.explain_codex_usage_for_beat(uuid,text,integer)'::regprocedure);
+```
+
+---
+
+# Warum ich dir die CREATE-Statements diesmal nicht ausformuliere
+
+Weil die letzten ausformulierten Vollblöcke von mir **nicht zuverlässig genug** waren und ich dir nicht noch einmal etwas als „fertig“ verkaufen will, das in Wahrheit verkürzt oder rekonstruiert ist.
+
+Die **einzig sichere Quelle** für die jeweils korrekte CREATE-Fassung ist jetzt deine Datenbank selbst.
+
+Mit diesen beiden SQLs bekommst du die **wirklich laufenden, vollständigen CREATE-Statements** direkt aus Postgres:
+
+# CREATE STATEMENT
+
+```typescript wrap="true"
+create or replace function public.explain_beat_codex(
+  p_beat_id uuid,
+  p_text text default null,
+  p_max_relation_depth integer default 2
+)
+returns jsonb
+language plpgsql
+stable
+as $function$
+declare
+  v_series_text text;
+  v_chapter_id uuid;
+  v_effective_at timestamptz;
+  v_pov_character_id uuid;
+  v_resolved_text text;
+  v_result jsonb;
+  v_max_relation_depth integer;
+begin
+  v_max_relation_depth := greatest(coalesce(p_max_relation_depth, 2), 0);
+
+  select
+    n.series_id::text,
+    ch.id,
+    s.starts_at,
+    ch.pov_character_entry_id,
+    coalesce(nullif(p_text, ''), nullif(b.beat_text, ''), nullif(b.draft_text, ''), '')
+  into
+    v_series_text,
+    v_chapter_id,
+    v_effective_at,
+    v_pov_character_id,
+    v_resolved_text
+  from public.beats b
+  join public.scenes s
+    on s.id = b.scene_id
+  join public.chapters ch
+    on ch.id = s.chapter_id
+  join public.novels n
+    on n.id = ch.novel_id
+  where b.id = p_beat_id;
+
+  if not found then
+    raise exception 'Beat % wurde nicht gefunden', p_beat_id;
+  end if;
+
+  with built as (
+    select public.build_full_codex_context_json(
+      p_beat_id,
+      v_resolved_text,
+      v_max_relation_depth
+    ) as dbg
+  ),
+  final_id_arrays as (
+    select
+      coalesce(array(select jsonb_array_elements_text(dbg #> '{ids,standard_codex_ids}')::uuid), '{}'::uuid[]) as standard_ids,
+      coalesce(array(select jsonb_array_elements_text(dbg #> '{ids,super_codex_ids}')::uuid), '{}'::uuid[]) as super_ids,
+      coalesce(array(select jsonb_array_elements_text(dbg #> '{ids,chapter_codex_ids}')::uuid), '{}'::uuid[]) as chapter_ids,
+      coalesce(array(select jsonb_array_elements_text(dbg #> '{ids,world_codex_ids}')::uuid), '{}'::uuid[]) as world_ids
+    from built
+  ),
+  final_all_ids as (
+    select
+      coalesce(f.standard_ids, '{}'::uuid[])
+      || coalesce(f.super_ids, '{}'::uuid[])
+      || coalesce(f.chapter_ids, '{}'::uuid[])
+      || coalesce(f.world_ids, '{}'::uuid[]) as ids
+    from final_id_arrays f
+  ),
+  final_detail_ids as (
+    select coalesce(
+      array(
+        select d.conditional_entry_id
+        from public.get_matching_codex_details_for_beat(
+          (select ids from final_all_ids),
+          p_beat_id
+        ) d
+      ),
+      '{}'::uuid[]
+    ) as ids
+  ),
+  raw_terms as (
+    select
+      e.id as codex_id,
+      e.name as codex_name,
+      e.case_sensitive,
+      e.name as raw_term,
+      'name'::text as match_source
+    from public.codex_entries e
+    where e.series_id = v_series_text
+      and e.name is not null
+
+    union all
+
+    select
+      e.id as codex_id,
+      e.name as codex_name,
+      e.case_sensitive,
+      a.alias as raw_term,
+      'alias'::text as match_source
+    from public.codex_entries e
+    join public.codex_aliases a
+      on a.entry_id = e.id
+    where e.series_id = v_series_text
+      and a.is_active = true
+      and a.alias is not null
+  ),
+  normalized_terms as (
+    select
+      rt.*,
+      regexp_replace(btrim(rt.raw_term), '\s+', ' ', 'g') as search_term
+    from raw_terms rt
+  ),
+  filtered_terms as (
+    select *
+    from normalized_terms
+    where search_term <> ''
+  ),
+  term_matches as (
+    select
+      ft.codex_id,
+      ft.codex_name,
+      ft.search_term,
+      ft.match_source,
+      exists (
+        select 1
+        where case
+          when ft.case_sensitive then
+            v_resolved_text ~ (
+              '(^|[^[:alnum:]_])'
+              || regexp_replace(ft.search_term, '([[\](){}.+*?^$|\\-])', '\\\1', 'g')
+              || '([^[:alnum:]_]|$)'
+            )
+          else
+            lower(v_resolved_text) ~ (
+              '(^|[^[:alnum:]_])'
+              || lower(regexp_replace(ft.search_term, '([[\](){}.+*?^$|\\-])', '\\\1', 'g'))
+              || '([^[:alnum:]_]|$)'
+            )
+        end
+      ) as term_matched
+    from filtered_terms ft
+  ),
+  matched_term_summary as (
+    select
+      tm.codex_id,
+      min(tm.codex_name) as codex_name,
+      jsonb_agg(
+        jsonb_build_object(
+          'term', tm.search_term,
+          'source', tm.match_source
+        )
+        order by tm.search_term
+      ) filter (where tm.term_matched) as matched_terms
+    from term_matches tm
+    where tm.term_matched
+    group by tm.codex_id
+  ),
+  exclusion_hits as (
+    select
+      ex.entry_id as codex_id,
+      jsonb_agg(ex.excluded_phrase order by ex.excluded_phrase) as exclusion_phrases
+    from public.codex_exclusions ex
+    where lower(v_resolved_text) like '%' || coalesce(ex.normalized_excluded_phrase, lower(ex.excluded_phrase)) || '%'
+    group by ex.entry_id
+  ),
+  direct_text_candidates as (
+    select
+      ce.id as codex_id,
+      ce.name as codex_name,
+      mts.matched_terms,
+      ce.is_active,
+      ce.track_mentions,
+      ce.ai_context_mode,
+      (
+        v_effective_at is null
+        or (
+          (ce.valid_from is null or ce.valid_from <= v_effective_at)
+          and (ce.valid_to is null or ce.valid_to >= v_effective_at)
+        )
+      ) as date_ok,
+      (eh.codex_id is not null) as exclusion_hit,
+      eh.exclusion_phrases,
+      (
+        ce.is_active = true
+        and ce.track_mentions = true
+        and ce.ai_context_mode <> 'never_include'
+        and (
+          v_effective_at is null
+          or (
+            (ce.valid_from is null or ce.valid_from <= v_effective_at)
+            and (ce.valid_to is null or ce.valid_to >= v_effective_at)
+          )
+        )
+        and eh.codex_id is null
+      ) as accepted_as_direct_text_match
+    from matched_term_summary mts
+    join public.codex_entries ce
+      on ce.id = mts.codex_id
+    left join exclusion_hits eh
+      on eh.codex_id = ce.id
+  ),
+  relation_tree_debug as (
+    with recursive rel as (
+      select
+        dtc.codex_id as root_entry_id,
+        dtc.codex_id as codex_id,
+        0 as depth,
+        array[dtc.codex_id] as path
+      from direct_text_candidates dtc
+      where dtc.accepted_as_direct_text_match = true
+
+      union all
+
+      select
+        rel.root_entry_id,
+        cr.target_entry_id as codex_id,
+        rel.depth + 1 as depth,
+        rel.path || cr.target_entry_id
+      from rel
+      join public.codex_relations cr
+        on cr.source_entry_id = rel.codex_id
+       and cr.is_active = true
+       and cr.pull_into_context = true
+      join public.codex_entries ce
+        on ce.id = cr.target_entry_id
+       and ce.is_active = true
+      left join exclusion_hits eh
+        on eh.codex_id = cr.target_entry_id
+      where rel.depth < v_max_relation_depth
+        and not (cr.target_entry_id = any(rel.path))
+        and (
+          v_effective_at is null
+          or (
+            (ce.valid_from is null or ce.valid_from <= v_effective_at)
+            and (ce.valid_to is null or ce.valid_to >= v_effective_at)
+          )
+        )
+        and eh.codex_id is null
+    )
+    select
+      rel.codex_id,
+      min(rel.depth) as relation_depth
+    from rel
+    group by rel.codex_id
+  ),
+  relation_reason_summary as (
+    select
+      rtd.codex_id,
+      min(rtd.relation_depth) as min_relation_depth
+    from relation_tree_debug rtd
+    where rtd.relation_depth > 0
+    group by rtd.codex_id
+  ),
+  touched_ids as (
+    select codex_id from direct_text_candidates
+    union
+    select codex_id from relation_tree_debug
+    union
+    select unnest((select chapter_ids from final_id_arrays))
+    union
+    select unnest((select world_ids from final_id_arrays))
+    union
+    select unnest((select standard_ids from final_id_arrays))
+    union
+    select unnest((select super_ids from final_id_arrays))
+  ),
+  codex_rows as (
+    select
+      ce.id,
+      ce.name,
+      ce.entry_type,
+      ce.is_active,
+      ce.track_mentions,
+      ce.ai_context_mode,
+      ce.valid_from,
+      ce.valid_to,
+      coalesce(dtc.matched_terms, '[]'::jsonb) as matched_terms,
+      coalesce(eh.exclusion_phrases, '[]'::jsonb) as exclusion_phrases,
+      coalesce(rrs.min_relation_depth, 0) as relation_depth,
+      (
+        v_effective_at is null
+        or (
+          (ce.valid_from is null or ce.valid_from <= v_effective_at)
+          and (ce.valid_to is null or ce.valid_to >= v_effective_at)
+        )
+      ) as date_ok,
+      (ce.id = any(coalesce((select standard_ids from final_id_arrays), '{}'::uuid[]))) as in_standard_codex,
+      (ce.id = any(coalesce((select super_ids from final_id_arrays), '{}'::uuid[]))) as in_super_codex,
+      (ce.id = any(coalesce((select chapter_ids from final_id_arrays), '{}'::uuid[]))) as in_chapter_codex,
+      (ce.id = any(coalesce((select world_ids from final_id_arrays), '{}'::uuid[]))) as in_world_codex
+    from touched_ids ti
+    join public.codex_entries ce
+      on ce.id = ti.codex_id
+    left join direct_text_candidates dtc
+      on dtc.codex_id = ce.id
+    left join exclusion_hits eh
+      on eh.codex_id = ce.id
+    left join relation_reason_summary rrs
+      on rrs.codex_id = ce.id
+  ),
+  codex_entries_json as (
+    select coalesce(
+      jsonb_agg(
+        jsonb_build_object(
+          'codex_entry_id', cr.id,
+          'codex_name', cr.name,
+          'entry_type', cr.entry_type,
+          'included_in_context',
+            (cr.in_standard_codex or cr.in_super_codex or cr.in_chapter_codex or cr.in_world_codex),
+          'included_buckets',
+            to_jsonb(
+              array_remove(
+                array[
+                  case when cr.in_standard_codex then 'codex' end,
+                  case when cr.in_super_codex then 'supercodex' end,
+                  case when cr.in_chapter_codex then 'chapter_codex' end,
+                  case when cr.in_world_codex then 'world_codex' end
+                ],
+                null
+              )
+            ),
+          'relation_depth', cr.relation_depth,
+          'human_summary',
+            case
+              when cr.in_super_codex then cr.name || ' ist im finalen Kontext als Super-Codex.'
+              when cr.in_standard_codex then cr.name || ' ist im finalen Kontext als Codex.'
+              when cr.in_chapter_codex then cr.name || ' ist im finalen Kontext als Chapter-Codex.'
+              when cr.in_world_codex then cr.name || ' ist im finalen Kontext als World-Codex.'
+              else cr.name || ' ist nicht im Kontext.'
+            end,
+          'human_reason_lines',
+            to_jsonb(
+              array_remove(
+                array[
+                  case when cr.in_super_codex then 'Finaler Bucket: Super-Codex.' end,
+                  case when cr.in_standard_codex then 'Finaler Bucket: Codex.' end,
+                  case when cr.in_chapter_codex then 'Finaler Bucket: Chapter-Codex.' end,
+                  case when cr.in_world_codex then 'Finaler Bucket: World-Codex.' end,
+                  case when jsonb_array_length(cr.matched_terms) > 0 then 'Name oder Alias wurde im Text erkannt.' end,
+                  case when cr.relation_depth > 0 then 'Der Eintrag wurde über Relationstiefe ' || cr.relation_depth || ' erreicht.' end,
+                  case when cr.in_super_codex and jsonb_array_length(cr.matched_terms) > 0 then 'Der Eintrag wurde zwar direkt erkannt, erscheint final aber als Super-Codex.' end,
+                  case when cr.in_chapter_codex then 'Der Eintrag ist mit diesem Kapitel verknüpft.' end,
+                  case when cr.in_world_codex then 'Der Eintrag ist als Always-Include / World-Codex konfiguriert.' end,
+                  case when cr.is_active = false then 'Der Eintrag ist inaktiv.' end,
+                  case when cr.track_mentions = false then 'Der Eintrag darf nicht über Textnennungen erkannt werden.' end,
+                  case when cr.ai_context_mode = 'never_include' then 'Der Eintrag ist für KI-Kontext gesperrt.' end,
+                  case when cr.date_ok = false then 'Der Eintrag ist zeitlich nicht gültig.' end,
+                  case when jsonb_array_length(cr.exclusion_phrases) > 0 then 'Eine Exclusion-Phrase wurde im Text gefunden.' end
+                ],
+                null
+              )
+            )
+        )
+        order by cr.name
+      ),
+      '[]'::jsonb
+    ) as payload
+    from codex_rows cr
+  ),
+  detail_base as (
+    select
+      cce.id as conditional_entry_id,
+      cce.codex_entry_id,
+      ce.name as codex_name,
+      cce.title,
+      cce.sort_order,
+      cce.is_active,
+      cce.condition_mode,
+      cce.requires_pov_character_id,
+      cce.valid_from,
+      cce.valid_to,
+      (cce.codex_entry_id = any(coalesce((select standard_ids from final_id_arrays), '{}'::uuid[]))
+       or cce.codex_entry_id = any(coalesce((select super_ids from final_id_arrays), '{}'::uuid[]))
+       or cce.codex_entry_id = any(coalesce((select chapter_ids from final_id_arrays), '{}'::uuid[]))
+       or cce.codex_entry_id = any(coalesce((select world_ids from final_id_arrays), '{}'::uuid[]))) as parent_in_final_context,
+      (
+        cce.requires_pov_character_id is null
+        or cce.requires_pov_character_id = v_pov_character_id
+      ) as pov_ok,
+      (
+        v_effective_at is null
+        or (
+          (cce.valid_from is null or cce.valid_from <= v_effective_at)
+          and (cce.valid_to is null or cce.valid_to >= v_effective_at)
+        )
+      ) as detail_date_ok,
+      (cce.id = any(coalesce((select ids from final_detail_ids), '{}'::uuid[]))) as included_final
+    from public.codex_conditional_entries cce
+    join public.codex_entries ce
+      on ce.id = cce.codex_entry_id
+    where cce.codex_entry_id in (select codex_id from touched_ids)
+  ),
+  detail_condition_joined as (
+    select
+      db.conditional_entry_id,
+      db.condition_mode,
+      cond.id as condition_id,
+      sv.id as variable_id,
+      css.value_json as current_value_json,
+      cond.operator,
+      cond.compare_value_json,
+      coalesce(
+        public.evaluate_story_variable_condition(
+          sv.type,
+          css.value_json,
+          cond.operator,
+          cond.compare_value_json
+        ),
+        false
+      ) as condition_matches
+    from detail_base db
+    left join public.codex_conditional_entry_variable_conditions cond
+      on cond.conditional_entry_id = db.conditional_entry_id
+    left join public.story_variables sv
+      on sv.id = cond.variable_id
+    left join public.get_story_state_at_beat(p_beat_id, 'gross') css
+      on css.variable_id = cond.variable_id
+  ),
+  detail_condition_summary as (
+    select
+      dcj.conditional_entry_id,
+      max(coalesce(dcj.condition_mode, 'all')) as condition_mode,
+      count(dcj.condition_id) as total_conditions,
+      coalesce(
+        bool_and(dcj.condition_matches) filter (where dcj.condition_id is not null),
+        true
+      ) as all_conditions_match,
+      coalesce(
+        bool_or(dcj.condition_matches) filter (where dcj.condition_id is not null),
+        false
+      ) as any_condition_match
+    from detail_condition_joined dcj
+    group by dcj.conditional_entry_id
+  ),
+  detail_trigger_summary as (
+    select
+      db.conditional_entry_id,
+      count(tt.id) as total_triggers,
+      count(*) filter (
+        where tt.match_mode = 'phrase'
+          and lower(v_resolved_text) like '%' || lower(tt.trigger_value) || '%'
+      ) as matching_phrase_triggers,
+      count(*) filter (
+        where tt.match_mode = 'regex'
+          and lower(v_resolved_text) ~* tt.trigger_value
+      ) as matching_regex_triggers
+    from detail_base db
+    left join public.codex_conditional_entry_text_triggers tt
+      on tt.conditional_entry_id = db.conditional_entry_id
+     and tt.is_active = true
+    group by db.conditional_entry_id
+  ),
+  detail_rows as (
+    select
+      db.*,
+      coalesce(dcs.total_conditions, 0) as total_conditions,
+      coalesce(dcs.condition_mode, 'all') as evaluated_condition_mode,
+      coalesce(dcs.all_conditions_match, true) as all_conditions_match,
+      coalesce(dcs.any_condition_match, false) as any_condition_match,
+      coalesce(dts.total_triggers, 0) as total_triggers,
+      (
+        coalesce(dts.matching_phrase_triggers, 0)
+        + coalesce(dts.matching_regex_triggers, 0)
+      ) as matching_triggers
+    from detail_base db
+    left join detail_condition_summary dcs
+      on dcs.conditional_entry_id = db.conditional_entry_id
+    left join detail_trigger_summary dts
+      on dts.conditional_entry_id = db.conditional_entry_id
+  ),
+  codex_details_json as (
+    select coalesce(
+      jsonb_agg(
+        jsonb_build_object(
+          'conditional_entry_id', dr.conditional_entry_id,
+          'codex_entry_id', dr.codex_entry_id,
+          'codex_name', dr.codex_name,
+          'title', dr.title,
+          'included_in_context', dr.included_final,
+          'human_summary',
+            case
+              when dr.included_final then 'Das Detail „' || dr.title || '“ ist im Kontext.'
+              else 'Das Detail „' || dr.title || '“ ist nicht im Kontext.'
+            end,
+          'human_reason_lines',
+            to_jsonb(
+              array_remove(
+                array[
+                  case
+                    when dr.parent_in_final_context
+                         and dr.codex_entry_id = any(coalesce((select super_ids from final_id_arrays), '{}'::uuid[]))
+                    then 'Der zugehörige Codex-Eintrag ist als Super-Codex im finalen Kontext.'
+                  end,
+                  case
+                    when dr.parent_in_final_context
+                         and dr.codex_entry_id = any(coalesce((select standard_ids from final_id_arrays), '{}'::uuid[]))
+                    then 'Der zugehörige Codex-Eintrag ist als Codex im finalen Kontext.'
+                  end,
+                  case
+                    when dr.parent_in_final_context
+                         and dr.codex_entry_id = any(coalesce((select chapter_ids from final_id_arrays), '{}'::uuid[]))
+                    then 'Der zugehörige Codex-Eintrag ist als Chapter-Codex im finalen Kontext.'
+                  end,
+                  case
+                    when dr.parent_in_final_context
+                         and dr.codex_entry_id = any(coalesce((select world_ids from final_id_arrays), '{}'::uuid[]))
+                    then 'Der zugehörige Codex-Eintrag ist als World-Codex im finalen Kontext.'
+                  end,
+                  case when dr.is_active = false then 'Das Detail ist inaktiv.' end,
+                  case when dr.pov_ok = false then 'Der POV-Filter passt nicht.' end,
+                  case when dr.detail_date_ok = false then 'Das Detail ist zeitlich nicht gültig.' end,
+                  case when dr.total_conditions = 0 then 'Es sind keine Variablenbedingungen definiert.' end,
+                  case when dr.total_conditions > 0 and dr.evaluated_condition_mode = 'all' and dr.all_conditions_match = true then 'Alle Variablenbedingungen sind erfüllt.' end,
+                  case when dr.total_conditions > 0 and dr.evaluated_condition_mode = 'all' and dr.all_conditions_match = false then 'Nicht alle Variablenbedingungen sind erfüllt.' end,
+                  case when dr.total_conditions > 0 and dr.evaluated_condition_mode = 'any' and dr.any_condition_match = true then 'Mindestens eine Variablenbedingung ist erfüllt.' end,
+                  case when dr.total_conditions > 0 and dr.evaluated_condition_mode = 'any' and dr.any_condition_match = false then 'Keine Variablenbedingung im Any-Modus ist erfüllt.' end,
+                  case when dr.total_triggers = 0 then 'Es sind keine Hyper-Codex-Trigger definiert.' end,
+                  case when dr.total_triggers > 0 and dr.matching_triggers > 0 then 'Mindestens ein Hyper-Codex-Trigger wurde im Text gefunden.' end,
+                  case when dr.total_triggers > 0 and dr.matching_triggers = 0 then 'Kein Hyper-Codex-Trigger wurde im Text gefunden.' end
+                ],
+                null
+              )
+            )
+        )
+        order by dr.codex_name, dr.sort_order, dr.title
+      ),
+      '[]'::jsonb
+    ) as payload
+    from detail_rows dr
+  )
+  select jsonb_build_object(
+    'input', jsonb_build_object(
+      'beat_id', p_beat_id,
+      'series_id', v_series_text,
+      'chapter_id', v_chapter_id,
+      'effective_at', v_effective_at,
+      'provided_text', p_text,
+      'resolved_text', v_resolved_text,
+      'max_relation_depth', v_max_relation_depth
+    ),
+    'codex_entries', (select payload from codex_entries_json),
+    'codex_details', (select payload from codex_details_json)
+  )
+  into v_result;
+
+  return v_result;
+end;
+$function$;
+```
+
+---
+
