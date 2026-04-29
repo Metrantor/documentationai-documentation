@@ -26,11 +26,327 @@ Sie enthält:
 
 - optional `debug_capture_error`
 
-
-
 Die normale Fassung und die Debug-Fassung unterscheiden sich nicht in der eigentlichen Renderlogik, sondern vor allem darin, was sie zusätzlich sichtbar macht: Die normale Fassung nimmt dein Template, ersetzt Platzhalter, wertet Script-Tags aus und gibt nur das finale `rendered` zurück; die Debug-Fassung macht intern denselben Job, liefert aber je nach `debug_level` zusätzliche Zwischenstände wie `template_original`, `template_after_placeholders`, gefundene Platzhalter, erkannte Tags, `rendered_before_cleanup`, eine AST-Zusammenfassung und auf Wunsch strukturiertere Fehlersicht zurück. Standardmäßig würde ich die Debug-Fassung trotzdem nicht dauerhaft „voll eingeschaltet“ nutzen, weil sie mehr Daten erzeugt, große Textinhalte und Zwischenstände mit durchschleppt, Ergebnisse unnötig aufbläht, bei langen Prompt-Kontexten Speicher und Übersicht frisst und im produktiven Flow eher Rauschen als Nutzen produziert; als technische Basis kannst du sie aber sehr gut überall verwenden und Debug einfach standardmäßig **aus** lassen, dann hast du nur minimalen Overhead und kannst bei Bedarf gezielt aufdrehen.
 
+Gern — hier ist eine Einleitung zur Nutzung des Debuggers, mit Erläuterungen und Beispielen, passend für deine Doku:
 
+---
+
+# Debug-Modus
+
+Der Debug-Modus hilft dabei, Templates nicht nur auszuführen, sondern ihren gesamten Verarbeitungsweg sichtbar zu machen. Das ist besonders nützlich, wenn ein Prompt unerwartet aussieht, Bedingungen nicht greifen, Platzhalter leer bleiben oder sich Fehler nur schwer lokalisieren lassen. Statt nur das finale Ergebnis zu sehen, zeigt der Debug-Modus die wichtigsten Zwischenstufen des Interpreters: das ursprüngliche Template, die Fassung nach der Platzhalterersetzung, die erkannten Script-Tags und – je nach Debug-Level – auch den Output vor dem Cleanup sowie eine kompakte Strukturanalyse. Dadurch lässt sich sehr schnell erkennen, **ob ein Problem beim Platzhalter, im Ausdruck oder in der Script-Logik selbst entstanden ist**.
+
+## Debug aktivieren
+
+Der Debug-Modus wird über Felder im Input-JSON eingeschaltet.
+
+**Beispiel:**
+
+```typescript
+{
+  "debug": true,
+  "debug_level": 2
+}
+
+```
+
+Optional kann zusätzlich gesetzt werden:
+
+```typescript
+{
+  "debug_capture_error": true
+}
+
+```
+
+Dann bricht der Node bei Fehlern nicht hart ab, sondern gibt die Fehlermeldung im Ergebnis zurück.
+
+---
+
+# Die Debug-Level
+
+## Debug-Level 1
+
+Debug-Level 1 ist die einfachste und wichtigste Stufe. Er zeigt:
+
+- `template_original`
+
+- `template_after_placeholders`
+
+Damit kannst du sofort sehen:
+
+- was ursprünglich im Template stand
+
+- was nach der Ersetzung von `{{...}}` tatsächlich übrig geblieben ist
+
+**Typischer Einsatz:**\
+Wenn du prüfen willst, ob ein Platzhalter korrekt aufgelöst wurde.
+
+**Beispiel-Template:**
+
+```typescript
+{% if ("{{crew_trust}}").toInt() > 150 %}
+hoch
+{% else %}
+niedrig
+{% endif %}
+
+```
+
+**Beispiel nach Platzhalterersetzung:**
+
+```typescript
+{% if ("63").toInt() > 150 %}
+hoch
+{% else %}
+niedrig
+{% endif %}
+
+```
+
+Hier sieht man sofort: Der Platzhalter wurde korrekt zu `63`.
+
+---
+
+## Debug-Level 2
+
+Debug-Level 2 liefert zusätzlich:
+
+- `placeholders`
+
+- `tags`
+
+- `rendered_before_cleanup`
+
+Damit kannst du tiefer analysieren:
+
+- welche Platzhalter erkannt wurden
+
+- wie sie aufgelöst wurden
+
+- welche Script-Tags im Template vorkamen
+
+- wie der Output vor dem finalen Aufräumen aussah
+
+**Typischer Einsatz:**\
+Wenn du an längeren Templates arbeitest und verstehen willst, welche Bausteine wirklich verarbeitet wurden.
+
+**Beispiel für&#x20;**`placeholders`**:**
+
+```typescript
+[
+  {
+    "raw": "{{crew_trust}}",
+    "name": "crew_trust",
+    "mode": null,
+    "count": null,
+    "sourceFound": true,
+    "originalLength": 2,
+    "resolvedLength": 2,
+    "preview": "63"
+  }
+]
+
+```
+
+**Beispiel für&#x20;**`tags`**:**
+
+```typescript
+[
+  "{% if (\"63\").toInt() > 150 %}",
+  "{% else %}",
+  "{% endif %}"
+]
+
+```
+
+**Beispiel für&#x20;**`rendered_before_cleanup`**:**
+
+```typescript
+niedrig
+
+```
+
+Das ist vor allem dann hilfreich, wenn du Leerzeilen oder ungewöhnliche Formatierung debuggen möchtest.
+
+---
+
+## Debug-Level 3
+
+Debug-Level 3 liefert zusätzlich:
+
+- `ast_summary`
+
+- `rendered_after_cleanup`
+
+Die `ast_summary` ist eine kompakte Zusammenfassung der Template-Struktur, also z. B. wie viele `if`, `switch` oder `expr`-Blöcke im Template enthalten waren.
+
+**Beispiel:**
+
+```typescript
+{
+  "text_count": 8,
+  "if_count": 2,
+  "switch_count": 1,
+  "expr_count": 3
+}
+
+```
+
+**Typischer Einsatz:**\
+Wenn du größere Templates analysieren willst und schnell eine strukturelle Übersicht brauchst.
+
+---
+
+# Fehler abfangen statt Workflow-Abbruch
+
+Wenn du `debug_capture_error = true` setzt, gibt der Interpreter bei Fehlern ein Fehlerobjekt zurück, statt den Node sofort scheitern zu lassen.
+
+**Input:**
+
+```typescript
+{
+  "debug": true,
+  "debug_level": 2,
+  "debug_capture_error": true
+}
+
+```
+
+**Möglicher Fehler-Output:**
+
+```typescript
+{
+  "rendered": null,
+  "error": {
+    "message": "Fehler in if-Bedingung \"> 150\": Ungültiger Ausdruck \"> 150\": Linker Operand fehlt"
+  }
+}
+
+```
+
+Das ist besonders praktisch, wenn du Templates testest, ohne dass dir gleich der ganze n8n-Run um die Ohren fliegt.
+
+---
+
+# Typische Anwendungsfälle
+
+## 1. Ein Platzhalter wird nicht ersetzt
+
+Wenn ein Ausdruck unerwartet leer bleibt, hilft zuerst `template_after_placeholders`.
+
+**Beispiel:**
+
+```typescript
+{% if {{crew_trust}} > 150 %}
+
+```
+
+Wenn `crew_trust` leer ist, siehst du im Debug sofort:
+
+```typescript
+{% if  > 150 %}
+
+```
+
+Damit ist klar: Das Problem liegt nicht im `if`, sondern in der fehlenden Platzhalterersetzung.
+
+---
+
+## 2. Ein `if`-Block verhält sich anders als gedacht
+
+Mit Debug-Level 2 siehst du:
+
+- den finalen Ausdruck im Tag
+
+- die gefundenen Platzhalter
+
+- das gerenderte Ergebnis vor Cleanup
+
+So kannst du prüfen, ob z. B. ein Stringwert erst noch `trim()` oder `lower()` gebraucht hätte.
+
+**Beispiel:**
+
+```typescript
+{% if ("{{route_locked}}").lower() == "true" %}
+Route gesichert.
+{% endif %}
+
+```
+
+Wenn `route_locked = " TRUE "` ist und du `trim()` vergessen hast, wird das leicht sichtbar.
+
+Besser wäre:
+
+```typescript
+{% if ("{{route_locked}}").trim().lower() == "true" %}
+Route gesichert.
+{% endif %}
+
+```
+
+---
+
+## 3. Lange Templates prüfen
+
+Bei großen Prompts lohnt sich Debug-Level 2 oder 3, um zu sehen:
+
+- welche Platzhalter überhaupt vorkommen
+
+- ob `first`/`last` korrekt greifen
+
+- wie groß der Output vor dem Cleanup ist
+
+- wie viele Logikblöcke das Template tatsächlich enthält
+
+Gerade bei AuraWrite ist das nützlich, wenn du mit:
+
+- Verlaufstexten
+
+- Kapitel-Drafts
+
+- Codex-Blöcken
+
+- Zeitlogik
+
+- mehreren Bedingungen
+
+arbeitest.
+
+---
+
+# Empfohlene Arbeitsweise
+
+Für neue Templates ist es sinnvoll, sie zunächst mit Debug-Level 2 zu testen. Das ist meist die nützlichste Stufe, weil sie genug Sichtbarkeit bietet, ohne zu sehr zu überladen. Wenn ein Template stabil läuft, kann Debug im produktiven Betrieb wieder ausgeschaltet werden. Bei schwierigen Fehlerfällen oder beim Umbau sehr großer Templates lohnt sich kurzzeitig Debug-Level 3. Und wenn du einen Testlauf machen willst, ohne dass ein Fehler den Workflow stoppt, ist `debug_capture_error = true` die beste Wahl.
+
+**Empfohlenes Setup für Entwicklung und Tests:**
+
+```typescript
+{
+  "debug": true,
+  "debug_level": 2,
+  "debug_capture_error": true
+}
+
+```
+
+---
+
+# Kurz gesagt
+
+Der Debug-Modus ist kein Extra-Spielzeug, sondern das wichtigste Werkzeug, um schnell zu verstehen:
+
+- was ursprünglich im Template stand,
+
+- was nach der Platzhalterersetzung wirklich da ist,
+
+- welche Script-Logik erkannt wurde,
+
+- und warum ein bestimmtes Ergebnis oder ein bestimmter Fehler entstanden ist.
+
+Gerade bei einem Interpreter, der Text, Bedingungen, Berechnungen und Datumslogik kombiniert, spart der Debug-Modus enorm viel Zeit bei Entwicklung, Test und Fehlersuche.
+
+# Code
 
 ```typescript
 function resolvePath(obj, path) {

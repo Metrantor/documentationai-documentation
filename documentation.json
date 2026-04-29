@@ -509,12 +509,12 @@
                 "group": "Prompt-Interpreter",
                 "pages": [
                   {
-                    "title": "Tipps und Tricks",
-                    "path": "tipps-und-tricks"
-                  },
-                  {
                     "title": "Interpreter Features",
                     "path": "interpreter-features"
+                  },
+                  {
+                    "title": "Tipps und Tricks",
+                    "path": "tipps-und-tricks"
                   },
                   {
                     "title": "Interpreter Code",
