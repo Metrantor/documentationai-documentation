@@ -1,0 +1,258 @@
+---
+title: public.get_prompt_runtime_bundle
+---
+```typescript
+create or replace function public.get_prompt_runtime_bundle(
+  p_prompt_id uuid,
+  p_author_profile_id uuid default null,
+  p_only_active boolean default true
+)
+returns jsonb
+language plpgsql
+stable
+security invoker
+set search_path = public
+as $$
+declare
+  v_prompt jsonb;
+  v_prompt_fields jsonb;
+  v_prompt_field_values jsonb;
+
+  v_author_bundle jsonb;
+  v_author_style jsonb;
+  v_stylesheets jsonb;
+  v_emotions jsonb;
+
+begin
+  /*
+    --------------------------------------------------------------------------
+    Prompt laden
+    --------------------------------------------------------------------------
+
+    p_prompt_id ist Pflicht.
+    Wenn der Prompt nicht existiert oder inaktiv ist, bricht die Funktion ab.
+  */
+  select jsonb_build_object(
+    'id', p.id,
+    'series_id', p.series_id,
+    'title', p.title,
+    'slug', p.slug,
+    'description', p.description,
+    'category', p.category,
+    'system_prompt_template', p.system_prompt_template,
+    'user_prompt_template', p.user_prompt_template,
+    'default_llm_model_id', p.default_llm_model_id,
+    'metadata', p.metadata,
+    'created_at', p.created_at,
+    'updated_at', p.updated_at
+  )
+  into v_prompt
+  from public.prompt_library p
+  where p.id = p_prompt_id
+    and (not p_only_active or p.is_active = true);
+
+  if v_prompt is null then
+    raise exception 'prompt_library entry not found or inactive: %', p_prompt_id;
+  end if;
+
+
+  /*
+    --------------------------------------------------------------------------
+    Prompt-Parameter laden
+    --------------------------------------------------------------------------
+
+    Quelle:
+    public.prompt_library_fields
+
+    Ergebnis:
+    prompt_parameters.fields = komplette Feldliste
+    prompt_parameters.values = schnelles Key-Value-Objekt
+  */
+  with ranked_fields as (
+    select
+      f.*,
+      row_number() over (
+        partition by f.field_key
+        order by
+          f.sort_order asc,
+          f.updated_at desc,
+          f.created_at desc,
+          f.id desc
+      ) as rn
+    from public.prompt_library_fields f
+    where f.prompt_id = p_prompt_id
+  ),
+  normalized_fields as (
+    select
+      rf.*,
+
+      /*
+        Unterstützt beide Varianten:
+
+        default_value_json = "abc"
+        default_value_json = { "value": "abc" }
+
+        Wenn ein "value"-Key existiert, wird dieser genutzt.
+        Sonst wird default_value_json direkt verwendet.
+      */
+      case
+        when jsonb_typeof(rf.default_value_json) = 'object'
+          and rf.default_value_json ? 'value'
+        then rf.default_value_json -> 'value'
+        else rf.default_value_json
+      end as default_value
+
+    from ranked_fields rf
+    where rf.rn = 1
+  )
+  select
+    coalesce(
+      jsonb_agg(
+        jsonb_build_object(
+          'id', nf.id,
+          'field_key', nf.field_key,
+          'label', nf.label,
+          'field_type', nf.field_type,
+          'help_text', nf.help_text,
+          'placeholder', nf.placeholder,
+          'is_required', nf.is_required,
+          'default_value', nf.default_value,
+          'default_value_json', nf.default_value_json,
+          'sort_order', nf.sort_order,
+          'metadata', nf.metadata
+        )
+        order by nf.sort_order, nf.field_key
+      ),
+      '[]'::jsonb
+    ),
+
+    coalesce(
+      jsonb_object_agg(
+        nf.field_key,
+        nf.default_value
+        order by nf.sort_order, nf.field_key
+      ),
+      '{}'::jsonb
+    )
+
+  into
+    v_prompt_fields,
+    v_prompt_field_values
+
+  from normalized_fields nf;
+
+
+  /*
+    --------------------------------------------------------------------------
+    Author Styles laden
+    --------------------------------------------------------------------------
+
+    WICHTIG:
+    p_author_profile_id darf NULL sein.
+
+    Wenn p_author_profile_id NULL ist:
+    - es wird kein Fehler geworfen
+    - stylesheets wird {}
+    - emotions wird {}
+
+    Wenn p_author_profile_id gesetzt ist:
+    - Autor muss existieren
+    - bei p_only_active = true muss Autor aktiv sein
+    - danach werden Stylesheets und Emotionen geladen
+  */
+  if p_author_profile_id is null then
+
+    v_author_bundle := jsonb_build_object(
+      'author',
+      jsonb_build_object(
+        'id', null,
+        'style', jsonb_build_object(
+          'emotions', jsonb_build_object()
+        )
+      )
+    );
+
+  else
+
+    if not exists (
+      select 1
+      from public.author_profiles a
+      where a.id = p_author_profile_id
+        and (not p_only_active or a.is_active = true)
+    ) then
+      raise exception 'author_profile not found or inactive: %', p_author_profile_id;
+    end if;
+
+    v_author_bundle := public.get_author_style_bundle(
+      p_author_profile_id,
+      p_only_active
+    );
+
+  end if;
+
+
+  /*
+    --------------------------------------------------------------------------
+    Stylesheets und Emotionen trennen
+    --------------------------------------------------------------------------
+
+    get_author_style_bundle liefert:
+
+    author.style.default
+    author.style.cinematic
+    author.style.emotions.melancholy
+
+    Für die neue Runtime-Struktur trennen wir das in:
+
+    author_styles.stylesheets.default
+    author_styles.emotions.melancholy
+  */
+  v_author_style := coalesce(
+    v_author_bundle #> '{author,style}',
+    '{}'::jsonb
+  );
+
+  v_emotions := coalesce(
+    v_author_style -> 'emotions',
+    '{}'::jsonb
+  );
+
+  v_stylesheets := v_author_style - 'emotions';
+
+
+  /*
+    --------------------------------------------------------------------------
+    Finale Ausgabe
+    --------------------------------------------------------------------------
+  */
+  return jsonb_build_object(
+    'prompt',
+    v_prompt,
+
+    'prompt_parameters',
+    jsonb_build_object(
+      'fields', v_prompt_fields,
+      'values', v_prompt_field_values
+    ),
+
+    'author_styles',
+    jsonb_build_object(
+      'stylesheets', v_stylesheets,
+      'emotions', v_emotions
+    ),
+
+    'author',
+    coalesce(
+      v_author_bundle -> 'author',
+      jsonb_build_object(
+        'id', p_author_profile_id,
+        'style', jsonb_build_object(
+          'emotions', jsonb_build_object()
+        )
+      )
+    )
+  );
+end;
+$$;
+```
+

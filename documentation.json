@@ -342,6 +342,10 @@
                         "group": "Codex-Context-Erstellung für Beats",
                         "pages": [
                           {
+                            "title": "get_prompt_scene_summary_context_for_beat",
+                            "path": "get-prompt-scene-summary-context-for-beat"
+                          },
+                          {
                             "group": "Codex-Inspector",
                             "pages": [
                               {
@@ -523,6 +527,15 @@
                   {
                     "title": "Debug-fähige Endfassung des Interpreters",
                     "path": "debug-fhige-endfassung-des-interpreters"
+                  }
+                ]
+              },
+              {
+                "group": "Prompt-Designer",
+                "pages": [
+                  {
+                    "title": "get_prompt_runtime_bundle",
+                    "path": "get-prompt-runtime-bundle"
                   }
                 ]
               }

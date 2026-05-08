@@ -1,0 +1,396 @@
+---
+title: get_prompt_scene_summary_context_for_beat
+---
+# `public.get_prompt_scene_summary_context_for_beat(...)`
+
+## Zweck
+
+Diese Funktion liefert den **lokalen Szenen-Zusammenfassungs-Kontext** für einen bestimmten Beat innerhalb des **aktuellen Kapitels**.
+
+Sie aggregiert die `summary`-Felder der Szenen des Kapitels in zwei getrennte Textblöcke:
+
+1. **Szenen-Zusammenfassungen vor der aktuellen Szene**
+
+2. **Szenen-Zusammenfassungen nach der aktuellen Szene**
+
+Die **aktuelle Szene selbst wird bewusst nicht einbezogen**.
+
+Das ist fachlich sinnvoll, weil der Zielbeat innerhalb der aktuellen Szene liegt und eine Szenenzusammenfassung der aktuellen Szene oft bereits Informationen enthalten kann, die aus Sicht des aktuellen Beats noch nicht „bekannt“ oder noch nicht ausgespielt sind.
+
+Die Funktion eignet sich besonders für Prompts, die:
+
+- kompakten lokalen Kapitelkontext brauchen
+
+- nicht immer mit vollem Draft-Kontext arbeiten sollen
+
+- lokale Vorher-/Nachher-Orientierung auf Szenenebene benötigen
+
+- Patch-, Rewrite- oder Verdichtungs-Prompts unterstützen
+
+---
+
+## Signatur
+
+```typescript
+```
+
+```typescript
+public.get_prompt_scene_summary_context_for_beat(
+  p_beat_id uuid,
+  p_before_limit integer default 4000,
+  p_after_limit integer default 4000
+)
+returns table (
+  current_chapter_scene_summaries_before_scene text,
+  current_chapter_scene_summaries_after_scene text,
+  current_chapter_scene_summaries_before_scene_truncated boolean,
+  current_chapter_scene_summaries_after_scene_truncated boolean
+)
+```
+
+---
+
+## Zweck im Gesamtsystem
+
+Die Funktion ergänzt den bestehenden Prompt-Kontext um eine **verdichtete lokale Szenenebene**.
+
+Sie steht zwischen:
+
+- &#x20;grober Kapitel-/Story-History&#x20;
+
+- &#x20;und feingranularem Draft-/Beat-Kontext&#x20;
+
+Damit kann ein Prompt später z. B. sowohl:
+
+- &#x20;den bisherigen Kapitelverlauf in Kurzform sehen&#x20;
+
+- &#x20;als auch wissen, was in späteren Szenen des gleichen Kapitels schon geplant oder zusammengefasst ist&#x20;
+
+ohne gleich den gesamten Drafttext mitschleppen zu müssen.
+
+---
+
+## Parameter
+
+### `p_beat_id uuid`
+
+Die ID des Zielbeats.
+
+Aus diesem Beat werden intern abgeleitet:
+
+- &#x20;das aktuelle Kapitel&#x20;
+
+- &#x20;die aktuelle Szene&#x20;
+
+- &#x20;die Szenenposition über `sort_order`&#x20;
+
+Diese Informationen kommen über die bestehende Hilfsfunktion:
+
+- `public.get_story_context_target(...)`&#x20;
+
+---
+
+### `p_before_limit integer default 4000`
+
+Maximale Zeichenzahl für den aggregierten Block der Szenen-Zusammenfassungen **vor** der aktuellen Szene.
+
+Wenn das Limit überschritten würde:
+
+- &#x20;werden weitere Szenenblöcke nicht mehr angehängt&#x20;
+
+- &#x20;das Flag `current_chapter_scene_summaries_before_scene_truncated` wird auf `true` gesetzt&#x20;
+
+---
+
+### `p_after_limit integer default 4000`
+
+Maximale Zeichenzahl für den aggregierten Block der Szenen-Zusammenfassungen **nach** der aktuellen Szene.
+
+Wenn das Limit überschritten würde:
+
+- &#x20;werden weitere Szenenblöcke nicht mehr angehängt&#x20;
+
+- &#x20;das Flag `current_chapter_scene_summaries_after_scene_truncated` wird auf `true` gesetzt&#x20;
+
+---
+
+## Fachlogik
+
+Die Funktion berücksichtigt nur Szenen, die:
+
+- &#x20;zum **aktuellen Kapitel** gehören&#x20;
+
+- &#x20;eine **nichtleere&#x20;**`summary` besitzen&#x20;
+
+Die Szenen werden über `sort_order` geordnet.
+
+### Block 1: `before_scene`
+
+Enthält nur Szenen mit:
+
+```typescript
+```
+
+```typescript
+s.sort_order < target_scene_sort
+```
+
+Also:
+
+- &#x20;nur Szenen **vor** der aktuellen Szene&#x20;
+
+- &#x20;die aktuelle Szene selbst ist ausgeschlossen&#x20;
+
+### Block 2: `after_scene`
+
+Enthält nur Szenen mit:
+
+```typescript
+```
+
+```typescript
+s.sort_order > target_scene_sort
+```
+
+Also:
+
+- &#x20;nur Szenen **nach** der aktuellen Szene&#x20;
+
+- &#x20;die aktuelle Szene selbst ist ausgeschlossen&#x20;
+
+---
+
+## Nicht enthalten
+
+Die Funktion berücksichtigt **nicht**:
+
+- &#x20;die aktuelle Szene selbst&#x20;
+
+- &#x20;Beat-Texte&#x20;
+
+- &#x20;Draft-Texte&#x20;
+
+- &#x20;Kapitelzusammenfassungen&#x20;
+
+- &#x20;Mainflow-/Inflow-Historie&#x20;
+
+- &#x20;Kapitel anderer Romane&#x20;
+
+- &#x20;Codex-Einträge&#x20;
+
+Sie ist bewusst auf **lokale Szenen-Summaries im aktuellen Kapitel** begrenzt.
+
+---
+
+## Rückgabewerte
+
+| Feld                                                     | Typ       | Bedeutung                                                        |
+| -------------------------------------------------------- | --------- | ---------------------------------------------------------------- |
+| `current_chapter_scene_summaries_before_scene`           | `text`    | Aggregierte Szenen-Summaries vor der aktuellen Szene             |
+| `current_chapter_scene_summaries_after_scene`            | `text`    | Aggregierte Szenen-Summaries nach der aktuellen Szene            |
+| `current_chapter_scene_summaries_before_scene_truncated` | `boolean` | `true`, wenn der Vorher-Block wegen Limit nicht vollständig ist  |
+| `current_chapter_scene_summaries_after_scene_truncated`  | `boolean` | `true`, wenn der Nachher-Block wegen Limit nicht vollständig ist |
+
+---
+
+## Beispielaufruf
+
+### Standardaufruf
+
+```typescript
+```
+
+```typescript
+select *
+from public.get_prompt_scene_summary_context_for_beat(
+  p_beat_id => '18f58f5a-a454-4cdc-8a60-7eec80c1b007'::uuid
+);
+```
+
+### Mit eigenen Limits
+
+```typescript
+```
+
+```typescript
+select *
+from public.get_prompt_scene_summary_context_for_beat(
+  p_beat_id => '18f58f5a-a454-4cdc-8a60-7eec80c1b007'::uuid,
+  p_before_limit => 2500,
+  p_after_limit => 3000
+);
+```
+
+---
+
+## Beispielhafte Rückgabe
+
+### Tabellarisch
+
+```typescript
+```
+
+```typescript
+current_chapter_scene_summaries_before_scene =
+"Die Kalega tritt in instabile Nähe eines alten Reaktorfelds ein.
+Sarvin erkennt erste Anzeichen eines systemischen Energieproblems."
+
+current_chapter_scene_summaries_after_scene =
+"Mira Taal erkennt, dass die Route nach Talvorn manipuliert wurde.
+Die Besatzung beginnt zu begreifen, dass der Reaktor nicht das einzige Problem ist."
+
+current_chapter_scene_summaries_before_scene_truncated = false
+current_chapter_scene_summaries_after_scene_truncated = false
+```
+
+### Als JSON
+
+```typescript
+```
+
+```typescript
+{
+  "current_chapter_scene_summaries_before_scene": "Die Kalega tritt in instabile Nähe eines alten Reaktorfelds ein.\n\nSarvin erkennt erste Anzeichen eines systemischen Energieproblems.",
+  "current_chapter_scene_summaries_after_scene": "Mira Taal erkennt, dass die Route nach Talvorn manipuliert wurde.\n\nDie Besatzung beginnt zu begreifen, dass der Reaktor nicht das einzige Problem ist.",
+  "current_chapter_scene_summaries_before_scene_truncated": false,
+  "current_chapter_scene_summaries_after_scene_truncated": false
+}
+```
+
+---
+
+## Typische Verwendung im Prompt
+
+Diese Funktion ist dafür gedacht, später solche Platzhalter zu befüllen:
+
+```typescript
+```
+
+```typescript
+<current_chapter_scene_summaries_before_scene>
+{{current_chapter_scene_summaries_before_scene}}
+</current_chapter_scene_summaries_before_scene>
+
+<current_chapter_scene_summaries_after_scene>
+{{current_chapter_scene_summaries_after_scene}}
+</current_chapter_scene_summaries_after_scene>
+```
+
+Gerade für kompakte Prompts kann das nützlich sein, wenn:
+
+- &#x20;der volle Draft-Kontext zu lang wäre&#x20;
+
+- &#x20;man aber dennoch den lokalen Verlauf des Kapitels auf Szenenebene abbilden möchte&#x20;
+
+---
+
+## Abhängigkeiten
+
+Die Funktion setzt voraus, dass diese Hilfsfunktion vorhanden ist:
+
+- `public.get_story_context_target(...)`&#x20;
+
+Außerdem natürlich die Tabellen:
+
+- `public.scenes`&#x20;
+
+- `public.beats`&#x20;
+
+Dabei werden mindestens diese Felder benötigt:
+
+- `scenes.chapter_id`&#x20;
+
+- `scenes.sort_order`&#x20;
+
+- `scenes.summary`&#x20;
+
+- `beats.id`&#x20;
+
+- `beats.scene_id`&#x20;
+
+---
+
+## SQL-Statement
+
+```typescript
+```
+
+```typescript
+create or replace function public.get_prompt_scene_summary_context_for_beat(
+  p_beat_id uuid,
+  p_before_limit integer default 4000,
+  p_after_limit integer default 4000
+)
+returns table (
+  current_chapter_scene_summaries_before_scene text,
+  current_chapter_scene_summaries_after_scene text,
+  current_chapter_scene_summaries_before_scene_truncated boolean,
+  current_chapter_scene_summaries_after_scene_truncated boolean
+)
+language plpgsql
+stable
+as $function$
+declare
+  v_target record;
+  v_row record;
+  v_block text;
+
+  v_before text := '';
+  v_after text := '';
+
+  v_before_truncated boolean := false;
+  v_after_truncated boolean := false;
+begin
+  select *
+  into v_target
+  from public.get_story_context_target(null, p_beat_id);
+
+  for v_row in
+    select
+      s.sort_order,
+      s.summary
+    from public.scenes s
+    where s.chapter_id = v_target.chapter_id
+      and nullif(btrim(coalesce(s.summary, '')), '') is not null
+    order by s.sort_order
+  loop
+    if v_row.sort_order < v_target.target_scene_sort then
+      v_block := nullif(btrim(coalesce(v_row.summary, '')), '');
+      if v_block is not null then
+        if char_length(v_before) + char_length(v_block) + 2 <= p_before_limit then
+          v_before :=
+            case
+              when v_before = '' then v_block
+              else v_before || E'\n\n' || v_block
+            end;
+        else
+          v_before_truncated := true;
+        end if;
+      end if;
+
+    elsif v_row.sort_order > v_target.target_scene_sort then
+      v_block := nullif(btrim(coalesce(v_row.summary, '')), '');
+      if v_block is not null then
+        if char_length(v_after) + char_length(v_block) + 2 <= p_after_limit then
+          v_after :=
+            case
+              when v_after = '' then v_block
+              else v_after || E'\n\n' || v_block
+            end;
+        else
+          v_after_truncated := true;
+        end if;
+      end if;
+    end if;
+  end loop;
+
+  return query
+  select
+    v_before,
+    v_after,
+    v_before_truncated,
+    v_after_truncated;
+end;
+$function$;
+```
+

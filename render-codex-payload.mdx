@@ -1,56 +1,369 @@
 ---
 title: render_codex_payload
 ---
-## `public.render_codex_payload(p_payload jsonb, p_root_tag text)`
+# `public.render_codex_payload(...)`
 
-### Zweck
+## Zweck
 
-Wandelt einen JSONB-Payload in einen XML-ähnlichen Prompt-Block um.
+Diese Funktion rendert ein JSONB-Payload mit Codex-Einträgen in einen **strukturierten Textblock ohne äußeren Root-Tag**.
 
-### Aufrufparameter
+Sie ist dafür gedacht, aus einem Payload wie:
 
-| Parameter    | Typ     | Bedeutung                                  |
-| ------------ | ------- | ------------------------------------------ |
-| `p_payload`  | `jsonb` | Codex-Payload                              |
-| `p_root_tag` | `text`  | Root-Tag, z. B. `codex` oder `super codex` |
+- `standard_codex`
 
-### Rückgabewert
+- `super_codex`
 
-| Rückgabe | Typ    | Bedeutung         |
-| -------- | ------ | ----------------- |
-| Ergebnis | `text` | gerenderter Block |
+- `chapter_codex`
 
-### Beispiel
+- `world_codex`
+
+einen Text zu erzeugen, der:
+
+- pro Eintrag klar gegliedert ist
+
+- aber **keinen äußeren Container-Tag** mehr enthält
+
+Damit ist die Funktion für deinen neuen Prompt-Ansatz geeignet, bei dem die **äußeren Tags erst später über&#x20;**`{{platzhalter}}`**&#x20;im Prompt-Template gesetzt werden**.
+
+---
+
+## Was die Funktion rendert
+
+Für jeden einzelnen Codex-Eintrag wird ein Block erzeugt in der Form:
 
 ```typescript
-select public.render_codex_payload(
-  '[{"codex_title":"Kalega","codex_text":"Ein Schiff","codex_details":["Alter Reaktor"]}]'::jsonb,
-  'codex'
-);
+<codex_entry name="Eintragstitel">
+Eintragstitel
+Haupttext
+
+Detail 1
+
+Detail 2
+</codex_entry>
 ```
 
-### Typisches Ergebnis
+Mehrere Einträge werden mit Leerzeilen getrennt.
+
+---
+
+## Was die Funktion bewusst **nicht mehr** macht
+
+Die Funktion erzeugt **keine äußeren Container-Tags** mehr wie:
+
+- `<codex>...</codex>`&#x20;
+
+- `<super codex>...</super codex>`&#x20;
+
+- `<chapter codex>...</chapter codex>`&#x20;
+
+- `<world codex>...</world codex>`&#x20;
+
+Diese Container sollen künftig erst im Prompt-Template über Platzhalter gesetzt werden, z. B.:
 
 ```typescript
 <codex>
-<codex entry name="Kalega">
-Kalega
-Ein Schiff
-Alter Reaktor
-</codex entry>
+{{codex}}
 </codex>
 ```
 
-# SQL
+---
+
+## Signatur
+
+```typescript
+public.render_codex_payload(
+  p_payload jsonb,
+  p_root_tag text default null
+) returns text
+```
+
+---
+
+## Parameter
+
+### `p_payload jsonb`
+
+Ein JSONB-Array mit Codex-Einträgen.
+
+Jeder Eintrag kann typischerweise enthalten:
+
+- `codex_title`&#x20;
+
+- `codex_text`&#x20;
+
+- `codex_details`&#x20;
+
+Beispielstruktur:
+
+```typescript
+[
+  {
+    "codex_title": "Reaktor der Kalega",
+    "codex_text": "Der Reaktor ist ein Monstrum.",
+    "codex_details": [
+      "Der Reaktor ist mattgrau.",
+      "Der Reaktor glüht rot."
+    ]
+  }
+]
+```
+
+---
+
+### `p_root_tag text default null`
+
+Historischer Parameter aus der älteren Rendering-Variante.
+
+Er wird in der aktuellen Fassung **nicht mehr verwendet**, bleibt aber in der Signatur erhalten, damit bestehende Aufrufe nicht sofort umgebaut werden müssen.
+
+Das bedeutet:
+
+- &#x20;du kannst ihn weiterhin übergeben&#x20;
+
+- &#x20;er beeinflusst das Ergebnis aber nicht mehr&#x20;
+
+---
+
+## Rückgabewert
+
+### `text`
+
+Ein zusammenhängender Textblock mit einem `<codex_entry>`-Block pro Payload-Eintrag.
+
+Wenn das Payload leer oder `null` ist, liefert die Funktion einen leeren String.
+
+---
+
+## Interne Logik
+
+Die Funktion arbeitet in drei Schritten:
+
+### 1. Payload in Einträge zerlegen
+
+Über:
+
+```typescript
+jsonb_array_elements(coalesce(p_payload, '[]'::jsonb)) with ordinality
+```
+
+werden die einzelnen JSON-Elemente samt Reihenfolge ausgelesen.
+
+---
+
+### 2. Pro Eintrag Textblock erzeugen
+
+Für jeden Eintrag wird aufgebaut:
+
+- `<codex_entry name="...">`&#x20;
+
+- &#x20;Titel&#x20;
+
+- &#x20;Haupttext&#x20;
+
+- &#x20;Details&#x20;
+
+- `</codex_entry>`&#x20;
+
+Dabei gilt:
+
+- &#x20;leere Felder werden ausgelassen&#x20;
+
+- &#x20;Details werden nur verarbeitet, wenn `codex_details` ein Array ist&#x20;
+
+- &#x20;Detaileinträge können Strings oder Objekte sein&#x20;
+
+Bei Objekten werden diese Felder bevorzugt gelesen:
+
+- `codex_detail`&#x20;
+
+- `detail_text`&#x20;
+
+- `text`&#x20;
+
+---
+
+### 3. Alle Eintragsblöcke zusammenführen
+
+Die gerenderten Einträge werden in Ursprungsreihenfolge mit Leerzeilen getrennt zusammengefügt.
+
+---
+
+## Beispielaufrufe
+
+### Einfacher Aufruf
+
+```typescript
+```
+
+```typescript
+select public.render_codex_payload(
+  '[{"codex_title":"Reaktor der Kalega","codex_text":"Der Reaktor ist ein Monstrum.","codex_details":["Der Reaktor ist mattgrau.","Der Reaktor glüht rot."]}]'::jsonb
+);
+```
+
+### Aufruf mit historischem `p_root_tag`
+
+```typescript
+```
+
+```typescript
+select public.render_codex_payload(
+  '[{"codex_title":"Mira Taal","codex_text":"Navigatorin und Auswerterin fragmentierter Routen.","codex_details":[]}]'::jsonb,
+  'chapter codex'
+);
+```
+
+Der zweite Parameter wird akzeptiert, aber nicht mehr verwendet.
+
+---
+
+## Beispielhafte Rückgabe
+
+### Textausgabe
+
+```typescript
+```
+
+```typescript
+<codex_entry name="Reaktor der Kalega">
+Reaktor der Kalega
+Der Reaktor ist ein Monstrum.
+
+Der Reaktor ist mattgrau.
+
+Der Reaktor glüht rot.
+</codex_entry>
+```
+
+### Mehrere Einträge
+
+```typescript
+```
+
+```typescript
+<codex_entry name="Mira Taal">
+Mira Taal
+Navigatorin und Auswerterin fragmentierter Routen.
+</codex_entry>
+
+<codex_entry name="Talvorn">
+Talvorn
+Ein abgelegener Zielraum mit verschlüsselter Navigationsbedeutung.
+</codex_entry>
+```
+
+---
+
+## Beispiel als JSON-Kontext
+
+### Eingabe
+
+```typescript
+```
+
+```typescript
+[
+  {
+    "codex_title": "Mira Taal",
+    "codex_text": "Navigatorin und Auswerterin fragmentierter Routen.",
+    "codex_details": []
+  },
+  {
+    "codex_title": "Talvorn",
+    "codex_text": "Ein abgelegener Zielraum mit verschlüsselter Navigationsbedeutung.",
+    "codex_details": []
+  }
+]
+```
+
+### Ausgabe
+
+```typescript
+```
+
+```typescript
+{
+  "rendered_text": "<codex_entry name=\"Mira Taal\">\nMira Taal\nNavigatorin und Auswerterin fragmentierter Routen.\n</codex_entry>\n\n<codex_entry name=\"Talvorn\">\nTalvorn\nEin abgelegener Zielraum mit verschlüsselter Navigationsbedeutung.\n</codex_entry>"
+}
+```
+
+---
+
+## Typische Verwendung im Gesamtsystem
+
+Die Funktion wird typischerweise innerhalb von:
+
+- `build_full_codex_context_json(...)`&#x20;
+
+verwendet, um aus den Payloads:
+
+- `standard_codex`&#x20;
+
+- `super_codex`&#x20;
+
+- `chapter_codex`&#x20;
+
+- `world_codex`&#x20;
+
+jeweils tagfreie, aber eintragsstrukturierte Textblöcke zu erzeugen.
+
+Diese landen dann z. B. unter:
+
+- `rendered.standard_codex`&#x20;
+
+- `rendered.super_codex`&#x20;
+
+- `rendered.chapter_codex`&#x20;
+
+- `rendered.world_codex`&#x20;
+
+und später weiter in:
+
+- `prompt_blocks.codex`&#x20;
+
+- `prompt_blocks.super_codex`&#x20;
+
+- `prompt_blocks.chapter_codex`&#x20;
+
+- `prompt_blocks.world_codex`&#x20;
+
+---
+
+## Warum diese Fassung sinnvoll ist
+
+Diese Variante ist ein guter Kompromiss zwischen:
+
+- **Struktur**&#x20;
+
+- **Kürzbarkeit**&#x20;
+
+- **Prompt-Flexibilität**&#x20;
+
+### Vorteile
+
+- &#x20;äußere Tags können später im Prompt-Template gesetzt werden&#x20;
+
+- &#x20;pro Codex-Eintrag bleibt die semantische Einheit erhalten&#x20;
+
+- &#x20;Kürzungen auf Blockebene sind leichter kontrollierbar&#x20;
+
+- &#x20;die KI erkennt weiterhin, wo einzelne Codex-Einträge beginnen und enden&#x20;
+
+---
+
+## SQL-Statement
+
+```typescript
+```
 
 ```typescript
 create or replace function public.render_codex_payload(
   p_payload jsonb,
-  p_root_tag text
+  p_root_tag text default null
 )
 returns text
 language sql
-immutable
+stable
 as $function$
 with entries as (
   select
@@ -64,9 +377,9 @@ rendered as (
     array_to_string(
       array_remove(
         array[
-          format('<codex entry name="%s">', coalesce(elem->>'codex_title', '')),
-          coalesce(elem->>'codex_title', ''),
-          coalesce(elem->>'codex_text', ''),
+          format('<codex_entry name="%s">', coalesce(elem->>'codex_title', '')),
+          nullif(coalesce(elem->>'codex_title', ''), ''),
+          nullif(coalesce(elem->>'codex_text', ''), ''),
           case
             when jsonb_typeof(elem->'codex_details') = 'array' then (
               select string_agg(detail_text, E'\n\n' order by didx)
@@ -92,7 +405,7 @@ rendered as (
             )
             else null
           end,
-          '</codex entry>'
+          '</codex_entry>'
         ],
         null
       ),
@@ -100,16 +413,12 @@ rendered as (
     ) as entry_text
   from entries
 )
-select array_to_string(
-  array_remove(
-    array[
-      format('<%s>', p_root_tag),
-      (select string_agg(entry_text, E'\n' order by ord) from rendered),
-      format('</%s>', p_root_tag)
-    ],
-    null
+select coalesce(
+  (
+    select string_agg(nullif(entry_text, ''), E'\n\n' order by ord)
+    from rendered
   ),
-  E'\n'
+  ''
 );
 $function$;
 ```
