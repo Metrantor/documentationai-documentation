@@ -1,0 +1,128 @@
+---
+title: Löschweitergabe von Code-Entry
+---
+Wenn Codex-Einträge gelöscht werden, werden auch automatisch die zugehörigen Bilder entfernt. Dadurch wird der Bucket, der diese Bilder enthält, ebenfalls gelöscht. Dafür gibt es eine spezielle Funktion, einen Trigger, der eine Edge-Funktion auf Seiten von Supabase auslöst. Hier finden Sie die Dokumentation zu diesen Funktionen.
+
+```typescript
+/*
+  AuraWrite / Codex Image Cleanup
+
+  Ziel:
+  Wenn public.codex_entries gelöscht wird, wird asynchron eine Edge Function
+  aufgerufen, die alle Storage-Objekte unter codex/<entry_id>/ löscht.
+
+  Wichtig:
+  - Reagiert nur auf echte DELETEs.
+  - Reagiert nicht auf is_active = false.
+  - Der eigentliche Storage-Delete passiert in der Edge Function über die Storage API.
+*/
+
+CREATE EXTENSION IF NOT EXISTS pg_net;
+
+CREATE OR REPLACE FUNCTION public.request_codex_entry_storage_cleanup()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, net
+AS $$
+DECLARE
+  cleanup_url text;
+  cleanup_token text;
+  cleanup_bucket text;
+BEGIN
+  cleanup_url := current_setting('app.supabase_url', true) || '/functions/v1/delete-codex-entry-folder';
+  cleanup_token := current_setting('app.codex_storage_cleanup_token', true);
+  cleanup_bucket := COALESCE(NULLIF(current_setting('app.codex_image_bucket', true), ''), 'codex-images');
+
+  IF cleanup_url IS NULL OR cleanup_url = '/functions/v1/delete-codex-entry-folder' THEN
+    RAISE WARNING 'Codex storage cleanup skipped: app.supabase_url is not configured.';
+    RETURN OLD;
+  END IF;
+
+  IF cleanup_token IS NULL OR cleanup_token = '' THEN
+    RAISE WARNING 'Codex storage cleanup skipped: app.codex_storage_cleanup_token is not configured.';
+    RETURN OLD;
+  END IF;
+
+  PERFORM net.http_post(
+    url := cleanup_url,
+    headers := jsonb_build_object(
+      'Content-Type', 'application/json',
+      'x-cleanup-token', cleanup_token
+    ),
+    body := jsonb_build_object(
+      'codex_entry_id', OLD.id,
+      'series_id', OLD.series_id,
+      'bucket', cleanup_bucket,
+      'prefix', 'codex/' || OLD.id::text || '/'
+    )
+  );
+
+  RETURN OLD;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_codex_entries_storage_cleanup ON public.codex_entries;
+
+CREATE TRIGGER trg_codex_entries_storage_cleanup
+AFTER DELETE ON public.codex_entries
+FOR EACH ROW
+EXECUTE FUNCTION public.request_codex_entry_storage_cleanup();
+```
+
+
+
+Damit die Funktion genutzt werden kann, muss sie zunächst initialisiert werden. Hier ist der entsprechende Code dazu.
+
+&#x20;
+
+```typescript
+ALTER DATABASE postgres
+SET app.supabase_url = 'https://DEIN-STORYMACHINE-PROJEKT.supabase.co';
+
+ALTER DATABASE postgres
+SET app.codex_image_bucket = 'codex-images';
+
+ALTER DATABASE postgres
+SET app.codex_storage_cleanup_token = 'EIN_LANGES_RANDOM_SECRET';
+```
+
+Hier die Befehle ganz konkret für meinen Fall mit dem entsprechenden Secret.&#x20;
+
+```typescript
+ALTER DATABASE postgres
+SET app.supabase_url = 'https://wtpasslneofjpffgfcnn.supabase.co';
+
+ALTER DATABASE postgres
+SET app.codex_image_bucket = 'codex-images';
+
+ALTER DATABASE postgres
+SET app.codex_storage_cleanup_token = 'as4lourx49ox8oi7wh8jnfms';
+```
+
+
+
+Hier die zugehörige Edge Funktion für Superbase sowie die weitere Dokumentation dazu.
+
+
+
+&#x20;
+
+```typescript
+```
+
+
+
+
+
+
+
+&#x20;
+
+
+
+
+
+
+
+&#x20;

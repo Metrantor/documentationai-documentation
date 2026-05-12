@@ -94,6 +94,10 @@
                 "group": "Funktionen",
                 "pages": [
                   {
+                    "title": "Codex-Importer",
+                    "path": "codex-importer"
+                  },
+                  {
                     "group": "Prompt-Variablen auswerten",
                     "pages": [
                       {
@@ -248,6 +252,15 @@
                   {
                     "group": "Medienerstellung",
                     "pages": [
+                      {
+                        "group": "Codex-Media_management",
+                        "pages": [
+                          {
+                            "title": "Löschweitergabe durch codex-entry",
+                            "path": "lschweitergabe-durch-codex-entry"
+                          }
+                        ]
+                      },
                       {
                         "group": "Jogg.ai",
                         "pages": [
