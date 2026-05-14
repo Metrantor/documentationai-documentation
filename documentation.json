@@ -94,8 +94,17 @@
                 "group": "Funktionen",
                 "pages": [
                   {
-                    "title": "Codex-Importer",
-                    "path": "codex-importer"
+                    "group": "Codex-Import",
+                    "pages": [
+                      {
+                        "title": "Import-Manager",
+                        "path": "import-manager"
+                      },
+                      {
+                        "title": "Codex-Importer",
+                        "path": "codex-importer"
+                      }
+                    ]
                   },
                   {
                     "group": "Prompt-Variablen auswerten",

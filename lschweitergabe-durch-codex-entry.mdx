@@ -109,7 +109,53 @@ Hier die zugehörige Edge Funktion für Superbase sowie die weitere Dokumentatio
 &#x20;
 
 ```typescript
+CREATE EXTENSION IF NOT EXISTS pg_net;
+
+CREATE OR REPLACE FUNCTION public.request_codex_entry_storage_cleanup()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, net
+AS $$
+DECLARE
+  cleanup_url text := 'https://wtpasslneofjpffgfcnn.supabase.co/functions/v1/delete-codex-entry-folder';
+  cleanup_bucket text := 'codex-images';
+
+  -- HIER denselben Wert eintragen wie im Edge Function Secret CODEX_STORAGE_CLEANUP_TOKEN
+  cleanup_token text := 'as4lourx49oeadft44325x8oi7wh8jnfms';
+BEGIN
+  PERFORM net.http_post(
+    url := cleanup_url,
+    headers := jsonb_build_object(
+      'Content-Type', 'application/json',
+      'x-cleanup-token', cleanup_token
+    ),
+    body := jsonb_build_object(
+      'codex_entry_id', OLD.id,
+      'series_id', OLD.series_id,
+      'bucket', cleanup_bucket,
+      'prefix', 'codex/' || OLD.id::text || '/'
+    )
+  );
+
+  RETURN OLD;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_codex_entries_storage_cleanup ON public.codex_entries;
+
+CREATE TRIGGER trg_codex_entries_storage_cleanup
+AFTER DELETE ON public.codex_entries
+FOR EACH ROW
+EXECUTE FUNCTION public.request_codex_entry_storage_cleanup();
+
+
+;
 ```
+
+
+
+
 
 
 

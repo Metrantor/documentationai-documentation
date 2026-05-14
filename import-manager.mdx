@@ -1,0 +1,229 @@
+---
+title: Import Manager
+---
+
+
+
+
+
+
+
+
+
+
+```typescript
+-- AuraWrite Codex Import Manager - Duration Patch
+-- Adds import duration tracking to public.codex_import_candidates
+-- and replaces the claim/finish RPCs accordingly.
+
+ALTER TABLE public.codex_import_candidates
+ADD COLUMN IF NOT EXISTS import_started_at timestamptz,
+ADD COLUMN IF NOT EXISTS import_finished_at timestamptz,
+ADD COLUMN IF NOT EXISTS import_duration_seconds integer,
+ADD COLUMN IF NOT EXISTS last_error text;
+
+CREATE OR REPLACE FUNCTION public.claim_next_codex_import_candidate(
+  p_max_active integer DEFAULT 5,
+  p_lease_minutes integer DEFAULT 30,
+  p_max_attempts integer DEFAULT 3,
+  p_default_series_id text DEFAULT NULL
+)
+RETURNS TABLE (
+  candidate_id uuid,
+  lease_id uuid,
+  name text,
+  url text,
+  series_id text,
+  import_attempts integer,
+  expires_at timestamptz
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_active integer;
+  v_candidate public.codex_import_candidates%ROWTYPE;
+  v_lease_id uuid;
+  v_series_id text;
+  v_claimed_at timestamptz := now();
+BEGIN
+  PERFORM pg_advisory_xact_lock(hashtext('aurawrite_codex_import_manager_claim'));
+
+  -- Expired leases release their candidates again, as long as max attempts are not exhausted.
+  -- The timed-out attempt duration is stored on the candidate for diagnostics.
+  WITH expired AS (
+    DELETE FROM public.codex_import_leases
+    WHERE expires_at <= now()
+    RETURNING candidate_id, started_at
+  )
+  UPDATE public.codex_import_candidates c
+  SET
+    import_is_pending = (c.import_attempts < p_max_attempts),
+    import_finished_at = now(),
+    import_duration_seconds = GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (now() - e.started_at)))::integer),
+    last_error = COALESCE(c.last_error, 'Lease expired before importer reported completion.')
+  FROM expired e
+  WHERE c.id = e.candidate_id
+    AND c.import_is_finished = false;
+
+  SELECT count(*)
+  INTO v_active
+  FROM public.codex_import_leases
+  WHERE expires_at > now();
+
+  IF v_active >= p_max_active THEN
+    RETURN;
+  END IF;
+
+  SELECT *
+  INTO v_candidate
+  FROM public.codex_import_candidates c
+  WHERE c.import_is_pending = true
+    AND c.import_is_finished = false
+    AND c.import_attempts < p_max_attempts
+    AND COALESCE(NULLIF(c.series_id, ''), NULLIF(p_default_series_id, '')) IS NOT NULL
+  ORDER BY c.created_at ASC
+  FOR UPDATE SKIP LOCKED
+  LIMIT 1;
+
+  IF NOT FOUND THEN
+    RETURN;
+  END IF;
+
+  v_series_id := COALESCE(NULLIF(v_candidate.series_id, ''), NULLIF(p_default_series_id, ''));
+
+  UPDATE public.codex_import_candidates
+  SET
+    import_is_pending = false,
+    import_attempts = import_attempts + 1,
+    last_attempt = v_claimed_at,
+    import_started_at = v_claimed_at,
+    import_finished_at = NULL,
+    import_duration_seconds = NULL,
+    last_error = NULL
+  WHERE id = v_candidate.id
+  RETURNING import_attempts INTO v_candidate.import_attempts;
+
+  INSERT INTO public.codex_import_leases (
+    candidate_id,
+    series_id,
+    source_url,
+    started_at,
+    heartbeat_at,
+    expires_at,
+    metadata
+  )
+  VALUES (
+    v_candidate.id,
+    v_series_id,
+    v_candidate.url,
+    v_claimed_at,
+    v_claimed_at,
+    v_claimed_at + make_interval(mins => p_lease_minutes),
+    jsonb_build_object(
+      'claimed_by', 'claim_next_codex_import_candidate',
+      'lease_minutes', p_lease_minutes,
+      'max_active', p_max_active
+    )
+  )
+  RETURNING id INTO v_lease_id;
+
+  RETURN QUERY
+  SELECT
+    v_candidate.id,
+    v_lease_id,
+    v_candidate.name,
+    v_candidate.url,
+    v_series_id,
+    v_candidate.import_attempts,
+    v_claimed_at + make_interval(mins => p_lease_minutes);
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.finish_codex_import_candidate(
+  p_candidate_id uuid,
+  p_lease_id uuid,
+  p_success boolean,
+  p_error text DEFAULT NULL,
+  p_requeue_on_failure boolean DEFAULT true,
+  p_max_attempts integer DEFAULT 3
+)
+RETURNS TABLE (
+  ok boolean,
+  action text
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_started_at timestamptz;
+  v_finished_at timestamptz := now();
+  v_duration_seconds integer;
+  v_attempts integer;
+BEGIN
+  PERFORM pg_advisory_xact_lock(hashtext('aurawrite_codex_import_manager_finish'));
+
+  SELECT started_at
+  INTO v_started_at
+  FROM public.codex_import_leases
+  WHERE id = p_lease_id
+    AND candidate_id = p_candidate_id;
+
+  IF v_started_at IS NULL THEN
+    RETURN QUERY SELECT false, 'lease_not_found_or_expired'::text;
+    RETURN;
+  END IF;
+
+  v_duration_seconds := GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (v_finished_at - v_started_at)))::integer);
+
+  SELECT import_attempts
+  INTO v_attempts
+  FROM public.codex_import_candidates
+  WHERE id = p_candidate_id
+  FOR UPDATE;
+
+  DELETE FROM public.codex_import_leases
+  WHERE id = p_lease_id
+    AND candidate_id = p_candidate_id;
+
+  IF p_success THEN
+    UPDATE public.codex_import_candidates
+    SET
+      import_is_finished = true,
+      import_is_pending = false,
+      import_finished_at = v_finished_at,
+      import_duration_seconds = v_duration_seconds,
+      last_error = NULL
+    WHERE id = p_candidate_id;
+
+    RETURN QUERY SELECT true, 'finished'::text;
+    RETURN;
+  END IF;
+
+  UPDATE public.codex_import_candidates
+  SET
+    import_is_finished = false,
+    import_is_pending = (
+      p_requeue_on_failure = true
+      AND COALESCE(v_attempts, import_attempts) < p_max_attempts
+    ),
+    import_finished_at = v_finished_at,
+    import_duration_seconds = v_duration_seconds,
+    last_error = LEFT(COALESCE(p_error, 'Unknown import error'), 4000)
+  WHERE id = p_candidate_id;
+
+  RETURN QUERY
+  SELECT
+    true,
+    CASE
+      WHEN p_requeue_on_failure = true AND COALESCE(v_attempts, 0) < p_max_attempts
+        THEN 'failed_requeued'
+      ELSE 'failed_final'
+    END::text;
+END;
+$$;
+
+```
+
