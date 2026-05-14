@@ -1,0 +1,526 @@
+---
+title: Aura Canvas Import V2
+---
+Gern. Hier ist die Doku zur jetzt laufenden Version.
+
+# Aura Canvas Import V2 – Supabase Funktionen
+
+Diese Importstrecke erzeugt aus einer Aura-Canvas-Struktur einen neuen Roman und importiert daraus Kapitel und Szenen.
+
+Aktuelle fachliche Zuordnung:
+
+```typescript
+chapters.pov_character_entry_id ← Kapitel-Canvas POV
+scenes.location_codex_id        ← Kapitel-Canvas Location, auf alle Szenen vererbt
+
+```
+
+---
+
+# 1. `public.create_novel_and_import_aura_canvas_v2(...)`
+
+## Zweck
+
+Diese Funktion ist der Einstiegspunkt für n8n.
+
+Sie erstellt einen neuen Roman in `public.novels` und ruft danach die eigentliche Importfunktion auf:
+
+```typescript
+public.import_aura_canvas_reduced_v2(...)
+
+```
+
+## Signatur
+
+```typescript
+public.create_novel_and_import_aura_canvas_v2(
+  p_series_id uuid,
+  p_predecessor_novel_id uuid,
+  p_payload jsonb
+)
+returns jsonb
+
+```
+
+## Aufrufparameter
+
+### `p_series_id`
+
+Typ: `uuid`\
+Pflicht: ja
+
+ID der Serie, in der der neue Roman angelegt wird.
+
+### `p_predecessor_novel_id`
+
+Typ: `uuid`\
+Pflicht: nein
+
+Optionaler Vorgängerroman. Kann `null` sein.
+
+### `p_payload`
+
+Typ: `jsonb`\
+Pflicht: ja
+
+Von n8n vorbereiteter Import-Payload.
+
+Minimalstruktur:
+
+```typescript
+{
+  "title": "Coming home",
+  "chapters": []
+}
+
+```
+
+Die Funktion ergänzt intern:
+
+```typescript
+{
+  "series_id": "...",
+  "novel_id": "..."
+}
+
+```
+
+## Beispielaufruf aus n8n
+
+```typescript
+select public.create_novel_and_import_aura_canvas_v2(
+  '{{ $('Webhook').item.json.body.series_id }}'::uuid,
+  null::uuid,
+  $1::jsonb
+);
+
+```
+
+Query Replacement:
+
+```typescript
+{{ JSON.stringify($('Canvas verschlanken').first().json) }}
+
+```
+
+## Beispielrückgabe
+
+```typescript
+{
+  "ok": true,
+  "created_novel_id": "8a9c3e0d-1f41-45a2-a782-d9fbd93d0123",
+  "series_id": "f1315197-5666-40b3-be56-42b4a3b1557e",
+  "import_result": {
+    "ok": true,
+    "novel_id": "8a9c3e0d-1f41-45a2-a782-d9fbd93d0123",
+    "chapters_imported": 3,
+    "scenes_imported": 16
+  }
+}
+
+```
+
+## Funktionsweise
+
+1. Ermittelt den nächsten `sort_order` innerhalb der Serie.
+
+2. Ermittelt den Romantitel aus `p_payload->>'title'`.
+
+3. Erstellt einen neuen Datensatz in `public.novels`.
+
+4. Ergänzt den Payload um `series_id` und `novel_id`.
+
+5. Ruft `public.import_aura_canvas_reduced_v2(...)` auf.
+
+6. Gibt das Ergebnis als JSON zurück.
+
+## Limits und Hinweise
+
+- Erstellt immer einen neuen Roman.
+
+- Aktualisiert keinen bestehenden Roman.
+
+- Löscht keine bestehenden Kapitel oder Szenen.
+
+- `is_standalone` wird auf `false` gesetzt.
+
+- `nsfw` wird auf `false` gesetzt.
+
+- Wenn kein Titel vorhanden ist, wird `"Neuer Roman"` verwendet.
+
+- Die Kapitel- und Szenenlogik liegt in `import_aura_canvas_reduced_v2`.
+
+## Create Statement
+
+```typescript
+create or replace function public.create_novel_and_import_aura_canvas_v2(
+  p_series_id uuid,
+  p_predecessor_novel_id uuid,
+  p_payload jsonb
+)
+returns jsonb
+language plpgsql
+security definer
+as $$
+declare
+  v_new_novel_id uuid;
+  v_new_sort_order integer;
+  v_title text;
+  v_payload jsonb;
+  v_import_result jsonb;
+begin
+  select coalesce(max(n.sort_order), 0) + 1
+    into v_new_sort_order
+  from public.novels n
+  where n.series_id = p_series_id;
+
+  v_title := coalesce(nullif(trim(p_payload->>'title'), ''), 'Neuer Roman');
+
+  insert into public.novels (
+    series_id,
+    title,
+    sort_order,
+    metadata,
+    predecessor_novel_id,
+    is_standalone,
+    nsfw
+  )
+  values (
+    p_series_id,
+    v_title,
+    v_new_sort_order,
+    coalesce(p_payload->'metadata', '{}'::jsonb),
+    p_predecessor_novel_id,
+    false,
+    false
+  )
+  returning id into v_new_novel_id;
+
+  v_payload := coalesce(p_payload, '{}'::jsonb)
+    || jsonb_build_object(
+      'series_id', p_series_id,
+      'novel_id', v_new_novel_id
+    );
+
+  v_import_result := public.import_aura_canvas_reduced_v2(v_payload);
+
+  return jsonb_build_object(
+    'ok', true,
+    'created_novel_id', v_new_novel_id,
+    'series_id', p_series_id,
+    'import_result', v_import_result
+  );
+end;
+$$;
+
+```
+
+---
+
+# 2. `public.import_aura_canvas_reduced_v2(...)`
+
+## Zweck
+
+Diese Funktion importiert Kapitel und Szenen aus dem reduzierten Aura-Canvas-Payload in einen bestehenden Roman.
+
+Sie wird normalerweise vom Wrapper aufgerufen:
+
+```typescript
+public.create_novel_and_import_aura_canvas_v2(...)
+
+```
+
+## Signatur
+
+```typescript
+public.import_aura_canvas_reduced_v2(
+  p_payload jsonb
+)
+returns jsonb
+
+```
+
+## Aufrufparameter
+
+### `p_payload`
+
+Typ: `jsonb`\
+Pflicht: ja
+
+Muss eine `novel_id` und ein `chapters`-Array enthalten.
+
+Minimalstruktur:
+
+```typescript
+{
+  "novel_id": "8a9c3e0d-1f41-45a2-a782-d9fbd93d0123",
+  "chapters": []
+}
+
+```
+
+## Erwartete Kapitelstruktur
+
+```typescript
+{
+  "title": "Kapitel 1",
+  "chapter_number": 1,
+  "sort_order": 1,
+  "idea": "Idee des Kapitels",
+  "summary": "Synopse des Kapitels",
+  "draft": "Aktueller Kapitelentwurf",
+  "handoff": "Übergabe an das nächste Kapitel",
+  "pov_character_entry_id": "ad4a980d-ec63-4de5-8c53-aa709b246859",
+  "metadata": {},
+  "scenes": []
+}
+
+```
+
+## Mapping Kapitel
+
+| Payload-Feld             | Tabelle           | Spalte                   |
+| ------------------------ | ----------------- | ------------------------ |
+| `title`                  | `public.chapters` | `title`                  |
+| `chapter_number`         | `public.chapters` | `chapter_number`         |
+| `sort_order`             | `public.chapters` | `sort_order`             |
+| `idea`                   | `public.chapters` | `idea`                   |
+| `summary`                | `public.chapters` | `summary`                |
+| `draft`                  | `public.chapters` | `draft`                  |
+| `handoff`                | `public.chapters` | `handoff`                |
+| `pov_character_entry_id` | `public.chapters` | `pov_character_entry_id` |
+| `metadata`               | `public.chapters` | `metadata`               |
+
+## Erwartete Szenenstruktur
+
+```typescript
+{
+  "title": "Szene 1",
+  "scene_number": 1,
+  "sort_order": 1,
+  "summary": "",
+  "draft": "Szenentext",
+  "location_codex_id": "1fcc2f33-3098-4555-b27c-a52b8d813eae",
+  "metadata": {}
+}
+
+```
+
+## Mapping Szenen
+
+| Payload-Feld        | Tabelle         | Spalte              |
+| ------------------- | --------------- | ------------------- |
+| `title`             | `public.scenes` | `title`             |
+| `scene_number`      | `public.scenes` | `scene_number`      |
+| `sort_order`        | `public.scenes` | `sort_order`        |
+| `summary`           | `public.scenes` | `summary`           |
+| `draft`             | `public.scenes` | `draft`             |
+| `location_codex_id` | `public.scenes` | `location_codex_id` |
+| `metadata`          | `public.scenes` | `metadata`          |
+
+## Fachliche Zuordnung
+
+```typescript
+POV:
+Kapitel-Canvas-Knoten
+→ chapter.pov_character_entry_id
+→ public.chapters.pov_character_entry_id
+
+Location:
+Kapitel-Canvas-Knoten
+→ jede scene.location_codex_id
+→ public.scenes.location_codex_id
+
+```
+
+## Beispielaufruf
+
+```typescript
+select public.import_aura_canvas_reduced_v2(
+  '{
+    "novel_id": "8a9c3e0d-1f41-45a2-a782-d9fbd93d0123",
+    "chapters": [
+      {
+        "title": "Kapitel 1",
+        "chapter_number": 1,
+        "sort_order": 1,
+        "idea": "Kirk kehrt zum Familiengrundstück zurück.",
+        "summary": "Kirk entdeckt die Industrieanlage.",
+        "draft": "Kirk jagt mit dem Motorrad durch die Wüste...",
+        "handoff": "Kirk plant eine Rückkehr.",
+        "pov_character_entry_id": "ad4a980d-ec63-4de5-8c53-aa709b246859",
+        "metadata": {
+          "source": "aura_canvas_import"
+        },
+        "scenes": [
+          {
+            "title": "Ritt zum Familiengrundstück",
+            "scene_number": 1,
+            "sort_order": 1,
+            "summary": "",
+            "draft": "Kirk jagt mit dem Motorrad über den Asphalt...",
+            "location_codex_id": "1fcc2f33-3098-4555-b27c-a52b8d813eae",
+            "metadata": {
+              "source": "aura_canvas_import"
+            }
+          }
+        ]
+      }
+    ]
+  }'::jsonb
+);
+
+```
+
+## Beispielrückgabe
+
+```typescript
+{
+  "ok": true,
+  "novel_id": "8a9c3e0d-1f41-45a2-a782-d9fbd93d0123",
+  "chapters_imported": 1,
+  "scenes_imported": 1
+}
+
+```
+
+## Funktionsweise
+
+1. Liest `novel_id` aus dem Payload.
+
+2. Bricht ab, wenn `novel_id` fehlt.
+
+3. Iteriert über `chapters`.
+
+4. Erstellt pro Kapitel einen Datensatz in `public.chapters`.
+
+5. Speichert Kapitel-Idee, Synopse, Draft, Handoff und POV.
+
+6. Iteriert pro Kapitel über `scenes`.
+
+7. Erstellt pro Szene einen Datensatz in `public.scenes`.
+
+8. Speichert Szenentitel, Szenentext und `location_codex_id`.
+
+9. Gibt Importzähler zurück.
+
+## Limits und Hinweise
+
+- Importiert nur neue Datensätze.
+
+- Aktualisiert keine bestehenden Kapitel oder Szenen.
+
+- Löscht keine vorhandenen Kapitel oder Szenen.
+
+- Doppelte Ausführung erzeugt doppelte Kapitel und Szenen.
+
+- `payload.novel_id` muss vorhanden und eine gültige UUID sein.
+
+- `pov_character_entry_id` muss entweder `null` oder eine gültige UUID sein.
+
+- `location_codex_id` muss entweder `null` oder eine gültige UUID sein.
+
+- `public.chapters.pov_character_entry_id` muss existieren.
+
+- `public.scenes.location_codex_id` muss existieren.
+
+- Leere Strings werden als `null` gespeichert.
+
+- `metadata` fällt auf `{}` zurück.
+
+- Es gibt keine eingebaute Deduplizierung über `canvas_node_id` oder `canvas_scene_id`.
+
+## Create Statement
+
+```typescript
+create or replace function public.import_aura_canvas_reduced_v2(p_payload jsonb)
+returns jsonb
+language plpgsql
+security definer
+as $$
+declare
+  v_novel_id uuid;
+  v_chapter jsonb;
+  v_scene jsonb;
+  v_chapter_id uuid;
+  v_chapter_count int := 0;
+  v_scene_count int := 0;
+begin
+  v_novel_id := nullif(p_payload->>'novel_id', '')::uuid;
+
+  if v_novel_id is null then
+    raise exception 'payload.novel_id must not be null';
+  end if;
+
+  for v_chapter in
+    select value
+    from jsonb_array_elements(coalesce(p_payload->'chapters', '[]'::jsonb))
+  loop
+    insert into public.chapters (
+      novel_id,
+      title,
+      chapter_number,
+      sort_order,
+      idea,
+      summary,
+      draft,
+      handoff,
+      pov_character_entry_id,
+      metadata
+    )
+    values (
+      v_novel_id,
+      coalesce(nullif(v_chapter->>'title', ''), 'Kapitel'),
+      coalesce(nullif(v_chapter->>'chapter_number', '')::int, nullif(v_chapter->>'sort_order', '')::int),
+      coalesce(nullif(v_chapter->>'sort_order', '')::int, nullif(v_chapter->>'chapter_number', '')::int),
+      nullif(v_chapter->>'idea', ''),
+      nullif(v_chapter->>'summary', ''),
+      nullif(v_chapter->>'draft', ''),
+      nullif(v_chapter->>'handoff', ''),
+      nullif(v_chapter->>'pov_character_entry_id', '')::uuid,
+      coalesce(v_chapter->'metadata', '{}'::jsonb)
+    )
+    returning id into v_chapter_id;
+
+    v_chapter_count := v_chapter_count + 1;
+
+    for v_scene in
+      select value
+      from jsonb_array_elements(coalesce(v_chapter->'scenes', '[]'::jsonb))
+    loop
+      insert into public.scenes (
+        chapter_id,
+        title,
+        scene_number,
+        sort_order,
+        summary,
+        draft,
+        location_codex_id,
+        metadata
+      )
+      values (
+        v_chapter_id,
+        coalesce(nullif(v_scene->>'title', ''), 'Szene'),
+        coalesce(nullif(v_scene->>'scene_number', '')::int, nullif(v_scene->>'sort_order', '')::int),
+        coalesce(nullif(v_scene->>'sort_order', '')::int, nullif(v_scene->>'scene_number', '')::int),
+        nullif(v_scene->>'summary', ''),
+        nullif(v_scene->>'draft', ''),
+        nullif(v_scene->>'location_codex_id', '')::uuid,
+        coalesce(v_scene->'metadata', '{}'::jsonb)
+      );
+
+      v_scene_count := v_scene_count + 1;
+    end loop;
+  end loop;
+
+  return jsonb_build_object(
+    'ok', true,
+    'novel_id', v_novel_id,
+    'chapters_imported', v_chapter_count,
+    'scenes_imported', v_scene_count
+  );
+end;
+$$;
+
+```
+

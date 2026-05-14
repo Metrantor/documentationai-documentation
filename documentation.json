@@ -206,6 +206,10 @@
                     "group": "Aura Canvas",
                     "pages": [
                       {
+                        "title": "Canvas Importer -> Novel",
+                        "path": "canvas-importer---novel"
+                      },
+                      {
                         "group": "n8n API Aufrufe",
                         "pages": [
                           {
